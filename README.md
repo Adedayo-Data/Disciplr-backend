@@ -5,9 +5,9 @@ API and milestone engine for [Disciplr](https://github.com/your-org/Disciplr): p
 ## What it does
 
 - **Health:** `GET /api/health` — service status and timestamp.
-- **Vaults:**  
-  - `GET /api/vaults` — list all vaults (in-memory placeholder).  
-  - `POST /api/vaults` — create a vault (body: `creator`, `amount`, `endTimestamp`, `successDestination`, `failureDestination`).  
+- **Vaults:**
+  - `GET /api/vaults` — list all vaults (in-memory placeholder).
+  - `POST /api/vaults` — create a vault (body: `creator`, `amount`, `endTimestamp`, `successDestination`, `failureDestination`).
   - `GET /api/vaults/:id` — get a vault by id.
 
 Data is stored in memory for now. Production would use PostgreSQL, a Horizon listener for on-chain events, and a proper milestone/verification engine.
@@ -38,12 +38,12 @@ API runs at **http://localhost:3000**. Frontend dev server can proxy `/api` to t
 
 ### Scripts
 
-| Command        | Description                    |
-|----------------|--------------------------------|
-| `npm run dev`  | Run with tsx watch (hot reload)|
-| `npm run build`| Compile TypeScript to `dist/`  |
-| `npm run start`| Run compiled `dist/index.js`  |
-| `npm run lint` | Run ESLint on `src`           |
+| Command         | Description                     |
+| --------------- | ------------------------------- |
+| `npm run dev`   | Run with tsx watch (hot reload) |
+| `npm run build` | Compile TypeScript to `dist/`   |
+| `npm run start` | Run compiled `dist/index.js`    |
+| `npm run lint`  | Run ESLint on `src`             |
 
 ### Example: create a vault
 
