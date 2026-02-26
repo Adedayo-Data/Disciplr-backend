@@ -4,6 +4,15 @@ API and milestone engine for Disciplr: programmable time-locked capital vaults o
 
 ## What it does
 
+- **Health:** `GET /api/health` - service status and timestamp.
+- **Auth:**
+  - `POST /api/auth/login` - mock login and audit logging.
+  - `POST /api/auth/users/:id/role` - role changes (admin only) with audit logging.
+- **Vaults:**
+  - `GET /api/vaults` - list all vaults with pagination, sorting, and filtering.
+  - `POST /api/vaults` - create a vault.
+  - `GET /api/vaults/:id` - get a vault by id.
+  - `POST /api/vaults/:id/cancel` - cancel a vault (creator/admin) with audit logging.
 - **Health:**
   - `GET /api/health` - service status and timestamp.
   - `GET /api/health/security` - abuse monitoring metrics snapshot.
@@ -16,10 +25,39 @@ API and milestone engine for Disciplr: programmable time-locked capital vaults o
   - `GET /api/transactions/:id` - get a transaction by id.
 - **Analytics:**
   - `GET /api/analytics` - list analytics views with pagination, sorting, and filtering.
+- **Admin:**
+  - `POST /api/admin/overrides/vaults/:id/cancel` - admin override to cancel vault with audit logging.
+  - `GET /api/admin/audit-logs` - admin-only audit log query endpoint.
+  - `GET /api/admin/audit-logs/:id` - admin-only single audit log lookup.
 
 All list endpoints support consistent query parameters for pagination (`page`, `pageSize`), sorting (`sortBy`, `sortOrder`), and filtering (endpoint-specific fields). See [API Patterns Documentation](docs/API_PATTERNS.md) for details.
 
 Data is stored in memory for now. Production would use PostgreSQL, a Horizon listener for on-chain events, and a proper milestone/verification engine.
+
+## User Audit Logging (Issue #45)
+
+This project tracks sensitive actions in an in-memory `audit_logs` table shape:
+
+- `id`
+- `actor_user_id`
+- `action`
+- `target_type`
+- `target_id`
+- `metadata`
+- `created_at`
+
+Current audited actions:
+
+- `auth.login`
+- `auth.role_changed`
+- `vault.created`
+- `vault.cancelled`
+- `admin.override`
+
+Admin-only access requirements for audit query endpoints:
+
+- `x-user-role: admin`
+- `x-user-id: <admin-user-id>`
 
 ## Tech stack
 
@@ -110,7 +148,7 @@ Migration tooling is standardized with Knex and PostgreSQL.
 - Baseline migration: `db/migrations/20260225190000_initial_baseline.cjs`
 - Full process (authoring, rollout, rollback, CI/CD): `docs/database-migrations.md`
 
-```
+```text
 disciplr-backend/
 |- src/
 |  |- routes/
@@ -118,6 +156,10 @@ disciplr-backend/
 |  |  |- vaults.ts
 |  |  |- transactions.ts
 |  |  |- analytics.ts
+|  |  |- auth.ts
+|  |  `- admin.ts
+|  |- middleware/
+|  |  `- queryParser.ts
 |  |  `- privacy.ts
 |  |- middleware/
 |  |  |- queryParser.ts
@@ -130,6 +172,7 @@ disciplr-backend/
 |  |  `- pagination.ts
 |  `- index.ts
 |- docs/
+|  `- API_PATTERNS.md
 |  |- API_PATTERNS.md
 |  `- database-migrations.md
 |- examples/
