@@ -1,52 +1,14 @@
-import { Router, type Request, type Response } from 'express'
+import { Router, Request, Response } from 'express'
+import { queryParser } from '../middleware/queryParser.js'
+import { applyFilters, applySort, paginateArray } from '../utils/pagination.js'
+import { createAuditLog } from '../lib/audit-logs.js'
 
 export const vaultsRouter = Router()
 
-type VaultStatus = 'active' | 'completed' | 'failed' | 'cancelled'
-type VaultRole = 'creator' | 'admin' | 'member'
-type VaultHistoryType = 'created' | 'cancel_requested' | 'cancelled' | 'cancel_rejected'
-type ValidationStatus = 'approved' | 'rejected'
-type ChainTxStatus = 'submitted' | 'confirmed'
-
-type VaultHistoryEntry = {
-  id: string
-  type: VaultHistoryType
-  timestamp: string
-  actor: string
-  role: VaultRole
-  note?: string
-}
-
-type VaultValidationRecord = {
-  id: string
-  type: 'cancellation'
-  status: ValidationStatus
-  reason?: string
-  actor: string
-  role: VaultRole
-  timestamp: string
-}
-
-type VaultChainTx = {
-  id: string
-  network: 'testnet'
-  status: ChainTxStatus
-  txHash: string
-  submittedAt: string
-  confirmedAt?: string
-}
-
-type VaultCancellation = {
-  requestedAt: string
-  cancelledAt: string
-  actor: string
-  role: VaultRole
-  reason?: string
-  chainTx: VaultChainTx
-}
+export type VaultStatus = 'active' | 'completed' | 'failed' | 'cancelled'
 
 // In-memory placeholder; replace with DB (e.g. PostgreSQL) later
-const vaults: Array<{
+export interface Vault {
   id: string
   creator: string
   amount: string
@@ -56,53 +18,63 @@ const vaults: Array<{
   failureDestination: string
   status: VaultStatus
   createdAt: string
-  fundedAt?: string
-  milestoneValidatedAt?: string
-  cancelledAt?: string
-  cancellation?: VaultCancellation
-  history: VaultHistoryEntry[]
-  validationRecords: VaultValidationRecord[]
-}> = []
+}
 
-const nowIso = () => new Date().toISOString()
-const makeId = (prefix: string) =>
+// In-memory placeholder; replace with DB (e.g. PostgreSQL) later
+export let vaults: Array<Vault> = []
+
+export const setVaults = (newVaults: Array<Vault>) => {
+  vaults = newVaults
+}
+
+const makeId = (prefix: string): string =>
   `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 
-const canCancelVault = (vault: (typeof vaults)[number], role: VaultRole) => {
+const getVaultById = (id: string): Vault | undefined => vaults.find((vault) => vault.id === id)
+
+export const cancelVaultById = (id: string):
+  | { vault: Vault; previousStatus: VaultStatus }
+  | { error: 'not_found' | 'already_cancelled' | 'not_cancellable'; currentStatus?: VaultStatus } => {
+  const vault = getVaultById(id)
+  if (!vault) {
+    return { error: 'not_found' }
+  }
+
+  if (vault.status === 'cancelled') {
+    return { error: 'already_cancelled', currentStatus: vault.status }
+  }
+
   if (vault.status !== 'active') {
-    return { allowed: false, reason: 'Vault is not active' }
+    return { error: 'not_cancellable', currentStatus: vault.status }
   }
-  if (vault.fundedAt) {
-    return { allowed: false, reason: 'Vault is already funded' }
-  }
-  if (vault.milestoneValidatedAt) {
-    return { allowed: false, reason: 'Milestone has already been validated' }
-  }
-  if (role !== 'creator' && role !== 'admin') {
-    return { allowed: false, reason: 'Only creator or admin can cancel a vault' }
-  }
-  return { allowed: true }
+
+  const previousStatus = vault.status
+  vault.status = 'cancelled'
+  return { vault, previousStatus }
 }
 
-const simulateCancellationOnChain = (): VaultChainTx => {
-  const submittedAt = nowIso()
-  const confirmedAt = nowIso()
-  return {
-    id: makeId('tx'),
-    network: 'testnet',
-    status: 'confirmed',
-    txHash: `0x${Math.random().toString(16).slice(2)}${Math.random().toString(16).slice(2)}`,
-    submittedAt,
-    confirmedAt,
+vaultsRouter.get(
+  '/',
+  queryParser({
+    allowedSortFields: ['createdAt', 'amount', 'endTimestamp', 'status'],
+    allowedFilterFields: ['status', 'creator'],
+  }),
+  (req: Request, res: Response) => {
+    let result = [...vaults]
+
+    if (req.filters) {
+      result = applyFilters(result, req.filters)
+    }
+
+    if (req.sort) {
+      result = applySort(result, req.sort)
+    }
+
+    const paginatedResult = paginateArray(result, req.pagination!)
+
+    res.json(paginatedResult)
   }
-}
-
-const isVaultRole = (role: string): role is VaultRole =>
-  role === 'creator' || role === 'admin' || role === 'member'
-
-vaultsRouter.get('/', (_req: Request, res: Response) => {
-  res.json({ vaults })
-})
+)
 
 vaultsRouter.post('/', (req: Request, res: Response) => {
   const {
@@ -121,8 +93,8 @@ vaultsRouter.post('/', (req: Request, res: Response) => {
   }
 
   const id = makeId('vault')
-  const startTimestamp = nowIso()
-  const vault = {
+  const startTimestamp = new Date().toISOString()
+  const vault: Vault = {
     id,
     creator,
     amount,
@@ -130,7 +102,7 @@ vaultsRouter.post('/', (req: Request, res: Response) => {
     endTimestamp,
     successDestination,
     failureDestination,
-    status: 'active' as const,
+    status: 'active',
     createdAt: startTimestamp,
     fundedAt: undefined,
     milestoneValidatedAt: undefined,
@@ -147,111 +119,90 @@ vaultsRouter.post('/', (req: Request, res: Response) => {
     ],
     validationRecords: [],
   }
+
   vaults.push(vault)
+
+  const actorUserId = req.header('x-user-id') ?? creator
+  createAuditLog({
+    actor_user_id: actorUserId,
+    action: 'vault.created',
+    target_type: 'vault',
+    target_id: vault.id,
+    metadata: {
+      creator,
+      amount,
+      endTimestamp,
+    },
+  })
+
   res.status(201).json(vault)
 })
 
 vaultsRouter.get('/:id', (req: Request, res: Response) => {
-  const vault = vaults.find((v) => v.id === req.params.id)
+  const vault = getVaultById(req.params.id)
   if (!vault) {
     res.status(404).json({ error: 'Vault not found' })
     return
   }
+
   res.json(vault)
 })
 
 vaultsRouter.post('/:id/cancel', (req: Request, res: Response) => {
-  const vault = vaults.find((v) => v.id === req.params.id)
-  if (!vault) {
+  const actorUserId = req.header('x-user-id')
+  const actorRole = req.header('x-user-role') ?? 'user'
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason : null
+
+  if (!actorUserId) {
+    res.status(400).json({ error: 'Missing x-user-id header' })
+    return
+  }
+
+  const existingVault = getVaultById(req.params.id)
+  if (!existingVault) {
     res.status(404).json({ error: 'Vault not found' })
     return
   }
 
-  const { actor, role, reason } = req.body as {
-    actor?: string
-    role?: VaultRole
-    reason?: string
-  }
-
-  if (!actor || !role) {
-    res.status(400).json({ error: 'Missing required fields: actor, role' })
-    return
-  }
-  if (!isVaultRole(role)) {
-    res.status(400).json({ error: 'Invalid role. Must be creator, admin, or member' })
+  const canCancel = actorUserId === existingVault.creator || actorRole === 'admin'
+  if (!canCancel) {
+    res.status(403).json({ error: 'Only the creator or an admin can cancel this vault' })
     return
   }
 
-  const validationId = makeId('validation')
-  const validationTimestamp = nowIso()
-  const eligibility = canCancelVault(vault, role)
-
-  if (!eligibility.allowed) {
-    const rejection: VaultValidationRecord = {
-      id: validationId,
-      type: 'cancellation',
-      status: 'rejected',
-      reason: eligibility.reason,
-      actor,
-      role,
-      timestamp: validationTimestamp,
+  const cancelResult = cancelVaultById(req.params.id)
+  if ('error' in cancelResult) {
+    if (cancelResult.error === 'already_cancelled') {
+      res.status(409).json({ error: 'Vault is already cancelled' })
+      return
     }
-    vault.validationRecords.push(rejection)
-    vault.history.push({
-      id: makeId('history'),
-      type: 'cancel_rejected',
-      timestamp: validationTimestamp,
-      actor,
-      role,
-      note: eligibility.reason,
-    })
-    res.status(422).json({ error: eligibility.reason, validation: rejection, vault })
+
+    if (cancelResult.error === 'not_cancellable') {
+      res.status(409).json({
+        error: `Vault cannot be cancelled from status: ${cancelResult.currentStatus}`,
+      })
+      return
+    }
+
+    res.status(404).json({ error: 'Vault not found' })
     return
   }
 
-  const requestedAt = validationTimestamp
-  vault.history.push({
-    id: makeId('history'),
-    type: 'cancel_requested',
-    timestamp: requestedAt,
-    actor,
-    role,
-    note: reason,
+  const auditLog = createAuditLog({
+    actor_user_id: actorUserId,
+    action: 'vault.cancelled',
+    target_type: 'vault',
+    target_id: cancelResult.vault.id,
+    metadata: {
+      previousStatus: cancelResult.previousStatus,
+      newStatus: cancelResult.vault.status,
+      actorRole,
+      reason,
+    },
   })
 
-  const chainTx = simulateCancellationOnChain()
-  const cancelledAt = chainTx.confirmedAt ?? requestedAt
-  const cancellation: VaultCancellation = {
-    requestedAt,
-    cancelledAt,
-    actor,
-    role,
-    reason,
-    chainTx,
-  }
-
-  vault.status = 'cancelled'
-  vault.cancelledAt = cancelledAt
-  vault.cancellation = cancellation
-
-  const approval: VaultValidationRecord = {
-    id: validationId,
-    type: 'cancellation',
-    status: 'approved',
-    reason,
-    actor,
-    role,
-    timestamp: cancelledAt,
-  }
-  vault.validationRecords.push(approval)
-  vault.history.push({
-    id: makeId('history'),
-    type: 'cancelled',
-    timestamp: cancelledAt,
-    actor,
-    role,
-    note: reason,
+  res.status(200).json({
+    vault: cancelResult.vault,
+    auditLogId: auditLog.id,
   })
-
-  res.json({ vault, cancellation })
 })
