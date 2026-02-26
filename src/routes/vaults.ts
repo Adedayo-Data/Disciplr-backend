@@ -77,6 +77,32 @@ vaultsRouter.post('/', async (req: Request, res: Response) => {
       res.status(500).json({ error: 'Failed to process idempotency key.' })
       return
     }
+  const id = makeId('vault')
+  const startTimestamp = new Date().toISOString()
+  const vault: Vault = {
+    id,
+    creator,
+    amount,
+    startTimestamp,
+    endTimestamp,
+    successDestination,
+    failureDestination,
+    status: 'active',
+    createdAt: startTimestamp,
+    fundedAt: undefined,
+    milestoneValidatedAt: undefined,
+    cancelledAt: undefined,
+    cancellation: undefined,
+    history: [
+      {
+        id: makeId('history'),
+        type: 'created' as const,
+        timestamp: startTimestamp,
+        actor: creator,
+        role: 'creator' as const,
+      },
+    ],
+    validationRecords: [],
   }
 
   const pool = getPgPool()
