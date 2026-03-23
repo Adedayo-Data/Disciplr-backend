@@ -1,28 +1,21 @@
 import { Request, Response, NextFunction } from 'express'
 import { AuthenticatedRequest } from './auth.js'
+import {
+  getOrganization,
+  getMemberRole as lookupMemberRole,
+} from '../models/organizations.js'
+import type { OrgRole } from '../models/organizations.js'
 
-export type OrgRole = 'owner' | 'admin' | 'member'
+export type { OrgRole } from '../models/organizations.js'
 
-export interface OrgMember {
-  orgId: string
-  userId: string
-  role: OrgRole
-}
-
-let orgMembers: OrgMember[] = []
-
-export const setOrgMembers = (members: OrgMember[]) => {
-  orgMembers = members
-}
-
-export const getMemberRole = (orgId: string, userId: string): OrgRole | null => {
-  const membership = orgMembers.find(m => m.orgId === orgId && m.userId === userId)
-  return membership ? membership.role : null
-}
-
-export const requireOrgAccess = (allowedRoles: OrgRole[]) => {
+/**
+ * Middleware factory that enforces organization-level access control.
+ * Checks that the org exists, the caller is a member, and their role
+ * is among the allowed set.
+ */
+export function requireOrgAccess(...allowedRoles: (OrgRole | string)[]) {
   return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-    const orgId = req.params.orgId || req.query.orgId as string
+    const orgId = req.params.orgId || (req.query.orgId as string)
     const userId = req.user?.userId || (req.user as any)?.sub
 
     if (!orgId || !userId) {
@@ -30,9 +23,20 @@ export const requireOrgAccess = (allowedRoles: OrgRole[]) => {
       return
     }
 
-    const role = getMemberRole(orgId, userId)
-    if (!role || !allowedRoles.includes(role)) {
-      res.status(403).json({ error: 'Insufficient organization permissions' })
+    const org = getOrganization(orgId)
+    if (!org) {
+      res.status(404).json({ error: 'Organization not found' })
+      return
+    }
+
+    const role = lookupMemberRole(orgId, userId)
+    if (!role) {
+      res.status(403).json({ error: 'Forbidden: not a member of this organization' })
+      return
+    }
+
+    if (!allowedRoles.includes(role)) {
+      res.status(403).json({ error: `Forbidden: requires role ${allowedRoles.join(' or ')}` })
       return
     }
 

@@ -1,16 +1,42 @@
 import request from 'supertest'
-import express from 'express'
-import { authenticate, signToken } from '../middleware/auth.js'
+import express, { Request, Response, NextFunction } from 'express'
+import jwt from 'jsonwebtoken'
 import { describe, it, expect } from '@jest/globals'
 import { UserRole } from '../types/user.js'
 import { requireOrgAccess } from '../middleware/orgAuth.js'
 import { queryParser } from '../middleware/queryParser.js'
 import { applyFilters, applySort, paginateArray } from '../utils/pagination.js'
-import { vaults, setVaults, Vault } from '../routes/vaults.js'
 import {
   setOrganizations,
   setOrgMembers,
 } from '../models/organizations.js'
+
+// Local vault store and type (avoids DB-heavy routes/vaults.ts import)
+interface Vault {
+  id: string; creator: string; amount: string;
+  status: 'active' | 'completed' | 'failed' | 'cancelled';
+  startTimestamp: string; endTimestamp: string;
+  successDestination: string; failureDestination: string;
+  createdAt: string; orgId?: string;
+}
+let vaults: Vault[] = []
+const setVaults = (v: Vault[]) => { vaults = v }
+
+// Mock authenticate (no session/DB dependency)
+const JWT_SECRET = process.env.JWT_SECRET ?? 'change-me-in-production'
+function mockAuthenticate(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Missing or malformed Authorization header' })
+    return
+  }
+  try {
+    req.user = jwt.verify(authHeader.slice(7), JWT_SECRET) as any
+    next()
+  } catch {
+    res.status(401).json({ error: 'Invalid token' })
+  }
+}
 
 // ── Test app ──────────────────────────────────────────────────────
 const app = express()
@@ -19,8 +45,8 @@ app.use(express.json())
 // Mount org vaults route
 app.get(
   '/api/organizations/:orgId/vaults',
-  authenticate,
-  requireOrgAccess('owner', UserRole.ADMIN, 'member'),
+  mockAuthenticate,
+  requireOrgAccess('owner', 'admin', 'member'),
   queryParser({
     allowedSortFields: ['createdAt', 'amount', 'endTimestamp', 'status'],
     allowedFilterFields: ['status', 'creator'],
@@ -38,8 +64,8 @@ app.get(
 // Mount org analytics route
 app.get(
   '/api/organizations/:orgId/analytics',
-  authenticate,
-  requireOrgAccess('owner', UserRole.ADMIN),
+  mockAuthenticate,
+  requireOrgAccess('owner', 'admin'),
   (req, res) => {
     const { orgId } = req.params
     const orgVaults = vaults.filter((v) => v.orgId === orgId)
@@ -82,7 +108,7 @@ app.get(
 
 // ── Helpers ───────────────────────────────────────────────────────
 const token = (sub: string, role: UserRole.USER | UserRole.VERIFIER | UserRole.ADMIN = UserRole.USER) =>
-  `Bearer ${signToken({ sub, role })}`
+  `Bearer ${jwt.sign({ sub, role }, JWT_SECRET, { expiresIn: '1h' })}`
 
 const ORG_ID = 'org-1'
 const OTHER_ORG_ID = 'org-other'
@@ -95,7 +121,7 @@ function seedData() {
 
   setOrgMembers([
     { orgId: ORG_ID, userId: 'alice', role: 'owner' },
-    { orgId: ORG_ID, userId: 'bob', role: UserRole.ADMIN },
+    { orgId: ORG_ID, userId: 'bob', role: 'admin' },
     { orgId: ORG_ID, userId: 'carol', role: 'member' },
     { orgId: OTHER_ORG_ID, userId: 'dave', role: 'owner' },
   ])
