@@ -24,6 +24,13 @@ import { resetIdempotencyStore } from '../src/services/idempotency.js'
 
 const testApp = express()
 testApp.use(express.json())
+testApp.use((_req, res, next) => {
+  res.setHeader('X-Timezone', 'UTC')
+  next()
+})
+testApp.get('/api/health', (_req, res) => {
+  res.status(200).json({ status: 'ok' })
+})
 testApp.use('/api/vaults', vaultsRouter)
 
 // ─── Token fixtures ───────────────────────────────────────────────────────────
@@ -66,7 +73,14 @@ describe('createVaultSchema – unit', () => {
   })
 
   it('accepts amount as a JS number and coerces to string', () => {
-    const result = createVaultSchema.safeParse({ ...validPayload(), amount: 500 })
+    const result = createVaultSchema.safeParse({
+      ...validPayload(),
+      amount: 500,
+      milestones: [
+        { title: 'Kickoff', dueDate: '2030-02-01T00:00:00.000Z', amount: '200' },
+        { title: 'Final review', dueDate: '2030-05-01T00:00:00.000Z', amount: '300' },
+      ],
+    })
     expect(result.success).toBe(true)
     if (result.success) expect(result.data.amount).toBe('500')
   })
@@ -599,5 +613,36 @@ describe('GET /api/vaults/:id', () => {
       .expect(200)
 
     expect(getRes.body.id).toBe(id)
+  })
+})
+
+describe('GET /api/vaults', () => {
+  it('returns 401 without auth', async () => {
+    const res = await request(testApp).get('/api/vaults')
+    expect(res.status).toBe(401)
+  })
+
+  it('returns list response with UTC timestamps', async () => {
+    await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const res = await request(testApp)
+      .get('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200)
+
+    expect(Array.isArray(res.body.data)).toBe(true)
+    expect(res.body.data[0].startDate).toMatch(/Z$/)
+    expect(res.body.data[0].createdAt).toMatch(/Z$/)
+  })
+})
+
+describe('X-Timezone header', () => {
+  it('includes X-Timezone: UTC on responses', async () => {
+    const res = await request(testApp).get('/api/health')
+    expect(res.headers['x-timezone']).toBe('UTC')
   })
 })
