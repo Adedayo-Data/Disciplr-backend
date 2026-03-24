@@ -1,4 +1,5 @@
-import { Router } from 'express'
+import { Router, type RequestHandler } from 'express'
+import { UserRole } from '../types/user.js'
 import type { BackgroundJobSystem } from '../jobs/system.js'
 import {
   isJobType,
@@ -7,9 +8,16 @@ import {
   type JobPayloadByType,
   type JobType,
 } from '../jobs/types.js'
+import { authenticate, authorize } from '../middleware/auth.middleware.js'
+import { strictRateLimiter } from '../middleware/rateLimiter.js'
+import { createAuditLog } from '../lib/audit-logs.js'
+
+
+
+// Helpers
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === 'object' && value !== null
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 const parseEnqueueOptions = (body: Record<string, unknown>): EnqueueOptions | null => {
@@ -57,13 +65,30 @@ const enqueueTypedJob = (
   }
 }
 
-export const createJobsRouter = (jobSystem: BackgroundJobSystem): Router => {
-  const jobsRouter = Router()
 
+// Router factory
+
+
+export interface JobsRouterOptions {
+  /** Override the rate limiter applied to POST /enqueue. Pass a no-op in tests. */
+  enqueueLimiter?: RequestHandler
+}
+
+export const createJobsRouter = (jobSystem: BackgroundJobSystem, options: JobsRouterOptions = {}): Router => {
+  const jobsRouter = Router()
+  const enqueueLimiter: RequestHandler = options.enqueueLimiter ?? strictRateLimiter
+
+  // All jobs endpoints require an authenticated admin
+  jobsRouter.use(authenticate)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  jobsRouter.use(authorize([UserRole.ADMIN]))
+
+  // GET /metrics — internal queue metrics (admin only)
   jobsRouter.get('/metrics', (_req, res) => {
     res.json(jobSystem.getMetrics())
   })
 
+  // GET /health — queue health status (admin only)
   jobsRouter.get('/health', (_req, res) => {
     const metrics = jobSystem.getMetrics()
     const totalExecutions = metrics.totals.executions
@@ -83,7 +108,8 @@ export const createJobsRouter = (jobSystem: BackgroundJobSystem): Router => {
     })
   })
 
-  jobsRouter.post('/enqueue', (req, res) => {
+  // POST /enqueue — manually trigger a background job (admin only, strict rate limit)
+  jobsRouter.post('/enqueue', enqueueLimiter, (req, res) => {
     if (!isRecord(req.body)) {
       res.status(400).json({ error: 'Body must be a JSON object' })
       return
@@ -114,11 +140,30 @@ export const createJobsRouter = (jobSystem: BackgroundJobSystem): Router => {
       return
     }
 
-    const queuedJob = enqueueTypedJob(jobSystem, type, payload, options)
-    res.status(202).json({
-      queued: true,
-      job: queuedJob,
-    })
+    try {
+      const queuedJob = enqueueTypedJob(jobSystem, type, payload, options)
+
+      createAuditLog({
+        actor_user_id: req.user!.userId,
+        action: 'job.enqueue',
+        target_type: 'job',
+        target_id: queuedJob.id,
+        metadata: {
+          jobType: type,
+          runAt: queuedJob.runAt,
+          maxAttempts: queuedJob.maxAttempts,
+          delayMs: options.delayMs ?? 0,
+        },
+      })
+
+      res.status(202).json({
+        queued: true,
+        job: queuedJob,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to enqueue job'
+      res.status(500).json({ error: message })
+    }
   })
 
   return jobsRouter
