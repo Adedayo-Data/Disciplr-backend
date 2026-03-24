@@ -5,12 +5,12 @@ import {
   mockMilestoneValidatedEvent,
   allMockEvents,
   createMockVaultCreatedEvent
-} from './fixtures/horizonEvents'
+} from './fixtures/horizonEvents.js'
 import {
   arbitraryParsedEvent,
   arbitraryVaultCreatedEvent,
   arbitraryMilestoneCreatedEvent
-} from './fixtures/arbitraries'
+} from './fixtures/arbitraries.js'
 import fc from 'fast-check'
 
 describe('Test Fixtures and Helpers', () => {

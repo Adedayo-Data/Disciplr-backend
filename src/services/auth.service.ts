@@ -1,7 +1,9 @@
 import { prisma } from '../lib/prisma.js'
 import { hashPassword, comparePassword, generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../lib/auth-utils.js'
 import { RegisterInput, LoginInput } from '../lib/validation.js'
-import { UserRole } from '@prisma/client'
+import { UserRole } from '../types/user.js'
+import { randomUUID } from 'node:crypto'
+import { recordSession } from './session.js'
 
 export class AuthService {
     static async register(input: RegisterInput) {
@@ -38,10 +40,15 @@ export class AuthService {
             data: { lastLoginAt: new Date() },
         })
 
-        const accessToken = generateAccessToken({ userId: user.id, role: user.role })
+        const jti = randomUUID()
+        const accessToken = generateAccessToken({ userId: user.id, role: user.role, jti })
         const refreshTokenValue = generateRefreshToken({ userId: user.id })
 
-        // Store refresh token
+        // 1. Record session for access token (middleware/auth.ts compatibility)
+        const accessExpiresAt = new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
+        await recordSession(user.id, jti, accessExpiresAt)
+
+        // 2. Store refresh token
         await prisma.refreshToken.create({
             data: {
                 token: refreshTokenValue,
@@ -75,9 +82,15 @@ export class AuthService {
                 data: { revokedAt: new Date() },
             })
 
-            const newAccessToken = generateAccessToken({ userId: storedToken.user.id, role: storedToken.user.role })
+            const jti = randomUUID()
+            const newAccessToken = generateAccessToken({ userId: storedToken.user.id, role: storedToken.user.role, jti })
             const newRefreshTokenValue = generateRefreshToken({ userId: storedToken.user.id })
 
+            // 1. Record new session for access token
+            const accessExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
+            await recordSession(storedToken.user.id, jti, accessExpiresAt)
+
+            // 2. Store new refresh token
             await prisma.refreshToken.create({
                 data: {
                     token: newRefreshTokenValue,
