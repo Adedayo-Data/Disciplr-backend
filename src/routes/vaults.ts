@@ -6,22 +6,15 @@ import { applyFilters, applySort, paginateArray } from '../utils/pagination.js'
 import { updateAnalyticsSummary } from '../db/database.js'
 import { createAuditLog } from '../lib/audit-logs.js'
 import {
-  IdempotencyConflictError,
   getIdempotentResponse,
   hashRequestPayload,
   saveIdempotentResponse
 } from '../services/idempotency.js'
 import { buildVaultCreationPayload } from '../services/soroban.js'
 import {
-  createVaultWithMilestones,
-  getVaultById,
   listVaults,
-  cancelVaultById
 } from '../services/vaultStore.js'
-import { normalizeCreateVaultInput, validateCreateVaultInput } from '../services/vaultValidation.js'
 import { queryParser } from '../middleware/queryParser.js'
-import { applyFilters, applySort, paginateArray } from '../utils/pagination.js'
-import { updateAnalyticsSummary } from '../db/database.js'
 import { utcNow } from '../utils/timestamps.js'
 import { prisma } from '../lib/prisma.js'
 
@@ -46,13 +39,6 @@ export interface Vault {
 /**
  * GET /api/vaults
  */
-vaultsRouter.get('/', authenticate, queryParser, (req: Request, res: Response) => {
-  const filtered = applyFilters(vaults, req.query)
-  const sorted = applySort(filtered, req.query.sort as string)
-  const { data, pagination } = paginateArray(sorted, Number(req.query.page) || 1, Number(req.query.limit) || 10)
-
-  res.json({ vaults: data, pagination })
-})
 vaultsRouter.get(
   '/',
   authenticate,
@@ -62,21 +48,19 @@ vaultsRouter.get(
   }),
   async (req: Request, res: Response) => {
     try {
-      // Fetch all vaults
-      let vaults = await listVaults()
-      
-      // Apply filters, sort, and pagination if available
+      let allVaults = await listVaults()
+
       if (req.filters && applyFilters) {
-          vaults = applyFilters(vaults as any, req.filters)
+        allVaults = applyFilters(allVaults as any, req.filters)
       }
       if (req.sort && applySort) {
-          vaults = applySort(vaults as any, req.sort)
+        allVaults = applySort(allVaults as any, req.sort)
       }
       if (req.pagination && paginateArray) {
-          vaults = paginateArray(vaults as any, req.pagination) as any
+        allVaults = paginateArray(allVaults as any, req.pagination) as any
       }
 
-      res.json(vaults)
+      res.json(allVaults)
     } catch (error: any) {
       res.status(500).json({ error: error.message })
     }
@@ -151,37 +135,6 @@ vaultsRouter.get('/:id', authenticate, async (req: Request, res: Response) => {
   if (!vault) {
     res.status(404).json({ error: 'Vault not found' })
     return
-    const responseBody = {
-      vault,
-      onChain: buildVaultCreationPayload(input, vault),
-      idempotency: { key: idempotencyKey, replayed: false },
-    }
-
-    if (idempotencyKey) {
-      await saveIdempotentResponse(idempotencyKey, requestHash, vault.id, responseBody, client ?? undefined)
-    }
-
-    const actorUserId = (req.header('x-user-id') ?? input.creator) || 'unknown'
-    createAuditLog({
-      actor_user_id: actorUserId,
-      action: 'vault.created',
-      target_type: 'vault',
-      target_id: vault.id,
-      metadata: { creator: input.creator, amount: input.amount },
-    })
-
-    if (client) await client.query('COMMIT')
-
-    // Trigger analytics update
-    updateAnalyticsSummary()
-
-    res.status(201).json(responseBody)
-  } catch (error) {
-    if (client) await client.query('ROLLBACK')
-    console.error('Vault creation failed', error)
-    res.status(500).json({ error: 'Failed to create vault.' })
-  } finally {
-    if (client) client.release()
   }
   res.json(vault)
 })
