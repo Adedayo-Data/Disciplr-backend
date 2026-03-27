@@ -18,6 +18,16 @@ export interface HorizonListenerConfig {
   shutdownTimeoutMs: number
 }
 
+function parseNonNegativeInteger(value: string | undefined, fallback?: number): number | undefined {
+  if (value === undefined) return fallback
+
+  const normalizedValue = value.trim()
+  if (normalizedValue.length === 0) return fallback
+  if (!/^\d+$/.test(normalizedValue)) return Number.NaN
+
+  return Number.parseInt(normalizedValue, 10)
+}
+
 /**
  * Load configuration from environment variables
  * Provides default values for optional settings
@@ -35,9 +45,9 @@ export function loadHorizonListenerConfig(): HorizonListenerConfig {
     : []
 
   // Parse optional numeric values with defaults
-  const startLedger = startLedgerRaw ? parseInt(startLedgerRaw, 10) : undefined
-  const retryMaxAttempts = retryMaxAttemptsRaw ? parseInt(retryMaxAttemptsRaw, 10) : 3
-  const retryBackoffMs = retryBackoffMsRaw ? parseInt(retryBackoffMsRaw, 10) : 100
+  const startLedger = parseNonNegativeInteger(startLedgerRaw)
+  const retryMaxAttempts = parseNonNegativeInteger(retryMaxAttemptsRaw, 3) as number
+  const retryBackoffMs = parseNonNegativeInteger(retryBackoffMsRaw, 100) as number
   const shutdownTimeoutMs = 30000 // 30 seconds default
 
   return {
