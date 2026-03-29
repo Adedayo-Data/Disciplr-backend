@@ -1,16 +1,17 @@
 import { Router, Request, Response } from 'express'
-import { authenticate, authorize } from '../middleware/auth.js'
+import { authenticate } from '../middleware/auth.js'
 import { UserRole, UserStatus } from '../types/user.js'
 import { userService } from '../services/user.service.js'
 import { forceRevokeUserSessions } from '../services/session.js'
 import { createAuditLog, getAuditLogById, listAuditLogs } from '../lib/audit-logs.js'
 import { cancelVaultById } from './vaults.js'
+import { requireAdmin } from '../middleware/rbac.js'
 
 export const adminRouter = Router()
 
 // Apply authentication to all admin routes
 adminRouter.use(authenticate)
-adminRouter.use(authorize([UserRole.ADMIN]))
+adminRouter.use(requireAdmin)
 
 /**
  * Force-logout a user (Admin only) - Preserve Issue #46 logic
