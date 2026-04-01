@@ -35,8 +35,11 @@ model User {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   lastLoginAt   DateTime?
+  deletedAt     DateTime?
   vaults        Vault[]
   refreshTokens RefreshToken[]
+
+  @@index([deletedAt])
 }
 
 model RefreshToken {

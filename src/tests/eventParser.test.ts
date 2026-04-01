@@ -1,5 +1,33 @@
 import { parseHorizonEvent, HorizonEvent } from '../services/eventParser.js'
 
+jest.mock('@stellar/stellar-sdk', () => ({
+  xdr: {
+    ScVal: {
+      fromXDR: jest.fn().mockReturnValue({})
+    }
+  },
+  scValToNative: jest.fn().mockImplementation((val) => {
+    // Return a sensible default based on common testing needs or just a dynamic object
+    return {
+      vault_id: 'vault-test-001',
+      creator: 'GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      amount: '1000.0000000',
+      start_date: Math.floor(Date.now() / 1000),
+      end_date: Math.floor(Date.now() / 1000) + 86400,
+      success_destination: 'GSUCCESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      failure_destination: 'GFAILUREXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      status: 'active',
+      milestone_id: 'milestone-test-001',
+      title: 'Test Milestone',
+      due_date: Math.floor(Date.now() / 1000) + 86400,
+      validation_id: 'validation-test-001',
+      validator: 'GVALIDATORXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
+      result: 'approved',
+      timestamp: Math.floor(Date.now() / 1000)
+    }
+  })
+}))
+
 describe('eventParser', () => {
   describe('parseHorizonEvent', () => {
     it('should parse vault_created event and route to vault payload parser', () => {
