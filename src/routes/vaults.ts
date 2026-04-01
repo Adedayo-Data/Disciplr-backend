@@ -97,7 +97,7 @@ vaultsRouter.post('/', authenticate, async (req: Request, res: Response) => {
 
     const responseBody: VaultCreateResponse = {
       vault,
-      onChain: buildVaultCreationPayload(input, vault),
+      onChain: await buildVaultCreationPayload(input, vault),
       idempotency: { key: idempotencyKey, replayed: false },
     }
 
