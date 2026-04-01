@@ -1,3 +1,9 @@
+import { initEnv } from './config/index.js'
+
+// Validate environment variables before any other initialisation.
+// This ensures the process exits immediately on misconfiguration.
+initEnv()
+
 import { app } from './app.js'
 import { vaultsRouter } from './routes/vaults.js'
 import { createHealthRouter } from './routes/health.js'
