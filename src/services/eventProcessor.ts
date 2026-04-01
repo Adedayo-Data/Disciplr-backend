@@ -2,6 +2,7 @@ import { Knex } from 'knex'
 import { ParsedEvent, ProcessorConfig, VaultEventPayload, MilestoneEventPayload, ValidationEventPayload } from '../types/horizonSync.js'
 import { retryWithBackoff, DEFAULT_RETRY_CONFIG } from '../utils/retry.js'
 import { createAuditLog } from '../lib/audit-logs.js'
+import { IdempotencyService } from './idempotency.js'
 
 /**
  * Result of processing an event
@@ -20,10 +21,12 @@ export interface ProcessingResult {
 export class EventProcessor {
   private db: Knex
   private config: ProcessorConfig
+  private idempotency: IdempotencyService
 
   constructor(db: Knex, config: ProcessorConfig) {
     this.db = db
     this.config = config
+    this.idempotency = new IdempotencyService(db)
   }
 
   /**
@@ -113,11 +116,9 @@ export class EventProcessor {
 
     try {
       // Check idempotency - if event already processed, return success
-      const existing = await trx('processed_events')
-        .where({ event_id: event.eventId })
-        .first()
+      const alreadyProcessed = await this.idempotency.isEventProcessed(event.eventId, trx)
 
-      if (existing) {
+      if (alreadyProcessed) {
         await trx.commit()
         return // Already processed
       }
@@ -125,15 +126,8 @@ export class EventProcessor {
       // Route to appropriate handler based on event type
       await this.routeEvent(event, trx)
 
-      // Store event_id in processed_events table
-      await trx('processed_events').insert({
-        event_id: event.eventId,
-        transaction_hash: event.transactionHash,
-        event_index: event.eventIndex,
-        ledger_number: event.ledgerNumber,
-        processed_at: new Date(),
-        created_at: new Date()
-      })
+      // Store event status for idempotency
+      await this.idempotency.markEventProcessed(event, trx)
 
       // Commit transaction
       await trx.commit()
