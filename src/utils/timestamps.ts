@@ -62,6 +62,33 @@ export function utcNow(): string {
   return new Date().toISOString()
 }
 
+/**
+ * Returns the start of value's UTC day (00:00:00.000Z).
+ * Useful for aggregating daily/weekly/monthly analytics.
+ */
+export function utcStartOfDay(value: string | Date = new Date()): string {
+  const date = typeof value === 'string' ? new Date(value) : value
+  return new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    0, 0, 0, 0
+  )).toISOString()
+}
+
+/**
+ * Returns the end of value's UTC day (23:59:59.999Z).
+ */
+export function utcEndOfDay(value: string | Date = new Date()): string {
+  const date = typeof value === 'string' ? new Date(value) : value
+  return new Date(Date.UTC(
+    date.getUTCFullYear(),
+    date.getUTCMonth(),
+    date.getUTCDate(),
+    23, 59, 59, 999
+  )).toISOString()
+}
+
 export interface FormatTimestampOptions {
   locale?: string
   timeZone?: string
