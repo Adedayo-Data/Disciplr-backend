@@ -49,7 +49,8 @@ export class EventProcessor {
           maxAttempts: this.config.maxRetries,
           initialBackoffMs: this.config.retryBackoffMs,
           maxBackoffMs: 60000,
-          backoffMultiplier: 2
+          backoffMultiplier: 2,
+          jitterFactor: 0.5
         }
       )
 
