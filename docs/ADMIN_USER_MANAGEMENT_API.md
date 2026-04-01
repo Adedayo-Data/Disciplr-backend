@@ -112,6 +112,19 @@ Observability + privacy notes:
 - Comprehensive audit logging
 - Tamper-proof audit trails
 
+## Audit Log Schema
+
+Audit entries are now normalized to a consistent schema and sanitized to prevent leaking sensitive data.
+
+Common audit log fields:
+- `id`: unique identifier
+- `actor_user_id`: user or system that performed the action
+- `action`: event name
+- `target_type`: entity type
+- `target_id`: entity identifier
+- `created_at`: ISO timestamp
+- `metadata`: structured key/value details (snake_case keys, sensitive keys removed, `admin_id` auto-populated for non-system actors)
+
 ## Error Responses
 
 ```json

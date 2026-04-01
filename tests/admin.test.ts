@@ -337,6 +337,47 @@ describe('Admin User Management API', () => {
 
       expect(response.body.audit_logs.every((log: any) => log.action === 'user.role.update')).toBe(true)
     })
+
+    test('should normalize metadata keys and include admin_id', async () => {
+      const targetUserId = testUsers[1].id
+
+      await request(app)
+        .patch(`/api/admin/users/${targetUserId}/role`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ role: UserRole.VERIFIER })
+        .expect(200)
+
+      const response = await request(app)
+        .get('/api/admin/audit-logs?action=user.role.update')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200)
+
+      const auditLog = response.body.audit_logs.find((log: any) => log.target_id === targetUserId)
+      expect(auditLog).toBeDefined()
+      expect(auditLog.metadata).toHaveProperty('admin_id', testUsers[0].id)
+      expect(auditLog.metadata).toHaveProperty('old_role')
+      expect(auditLog.metadata).toHaveProperty('new_role')
+      expect(auditLog.metadata).not.toHaveProperty('oldRole')
+    })
+
+    test('should strip sensitive data from metadata', async () => {
+      const loginResponse = await request(app)
+        .post('/api/auth/login')
+        .send({ userId: 'sensitive-audit-user' })
+        .expect(200)
+
+      const createdAuditLogId = loginResponse.body.auditLogId
+
+      const detailResponse = await request(app)
+        .get(`/api/admin/audit-logs/${createdAuditLogId}`)
+        .set('Authorization', `Bearer ${adminToken}`)
+        .expect(200)
+
+      expect(detailResponse.body.metadata).toHaveProperty('user_agent')
+      expect(detailResponse.body.metadata).not.toHaveProperty('ip')
+      expect(detailResponse.body.metadata).not.toHaveProperty('email')
+      expect(detailResponse.body.metadata).not.toHaveProperty('token')
+    })
   })
 
   describe('DELETE /api/admin/users/:id (Soft Delete)', () => {
