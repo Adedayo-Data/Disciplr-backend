@@ -73,6 +73,12 @@ export function initializeDatabase(): void {
     console.log('Database initialized successfully')
 }
 
+// Function to close database connection
+export function closeDatabase(): void {
+    db.close()
+    console.log('Database connection closed')
+}
+
 // Function to update analytics summary (can be called after vault changes)
 export function updateAnalyticsSummary(): void {
     const stats = db.prepare(`
