@@ -43,7 +43,15 @@ export const enforceRBAC = (options: RBACOptions) => {
   };
 };
 
-// Convenience
+// Convenience exports
+export const requireUser = enforceRBAC({
+  allow: [UserRole.USER, UserRole.VERIFIER, UserRole.ADMIN],
+});
+
+export const requireVerifier = enforceRBAC({
+  allow: [UserRole.VERIFIER, UserRole.ADMIN],
+});
+
 export const requireAdmin = enforceRBAC({
   allow: [UserRole.ADMIN],
 });
