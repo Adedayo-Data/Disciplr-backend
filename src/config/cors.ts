@@ -40,8 +40,9 @@ export const corsOptions: CorsOptions = {
     }
 
     // Check allowlist
-    const allowedOrigins = config.corsOrigins as string[];
-    if (allowedOrigins.includes(origin)) {
+    const allowedOrigins = config.corsOrigins as string[]
+    const normalizedOrigin = origin.replace(/\/+$/, '')
+    if (allowedOrigins.includes(normalizedOrigin)) {
       callback(null, true);
     } else {
       console.log(

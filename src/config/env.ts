@@ -36,7 +36,7 @@ const nonNegativeInt = (fallback: number) =>
  */
 export const envSchema = z
   .object({
-    // ── Core ────────────────────────────────────────────────────────────
+    // ── Core ────────────────────────────────────────────────────
     NODE_ENV: z
       .enum(["development", "production", "test"])
       .default("development"),
@@ -44,13 +44,14 @@ export const envSchema = z
     SERVICE_NAME: z.string().default("disciplr-backend"),
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 
-    // ── CORS ────────────────────────────────────────────────────
+    // ── CORS ────────────────────────────────────────────
     CORS_ORIGINS: z
       .string()
       .optional()
       .refine(
         (val) => {
-          if (!val) return true;
+          if (val === undefined) return true;
+          if (val === "") return false;
           if (val === "*") return true;
           const origins = val
             .split(",")
@@ -60,11 +61,11 @@ export const envSchema = z
         },
         {
           message:
-            'CORS_ORIGINS must be "*" or a comma-separated list of origins (no "*" in list)',
+            'CORS_ORIGINS must be "*" or a comma-separated list of origins (no "*" in list, cannot be empty)',
         },
       ),
 
-    // ── Auth / secrets ──────────────────────────────────────────────────
+    // ── Auth / secrets ──────────────────────────────────────────
     JWT_SECRET: z.string().default("change-me-in-production"),
     JWT_ACCESS_SECRET: z.string().default("fallback-access-secret"),
     JWT_REFRESH_SECRET: z.string().default("fallback-refresh-secret"),
@@ -72,32 +73,32 @@ export const envSchema = z
     JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
     DOWNLOAD_SECRET: z.string().default("change-me-in-production"),
 
-    // ── Horizon / Stellar ───────────────────────────────────────────────
+    // ── Horizon / Stellar ───────────────────────────────────────
     HORIZON_URL: z.string().optional(),
     CONTRACT_ADDRESS: z.string().optional(),
     START_LEDGER: nonNegativeInt(0).optional(),
     RETRY_MAX_ATTEMPTS: nonNegativeInt(3),
     RETRY_BACKOFF_MS: nonNegativeInt(100),
 
-    // ── Soroban ─────────────────────────────────────────────────────────
+    // ── Soroban ─────────────────────────────────────────────────
     SOROBAN_CONTRACT_ID: z.string().optional(),
     SOROBAN_NETWORK_PASSPHRASE: z.string().optional(),
     SOROBAN_SOURCE_ACCOUNT: z.string().optional(),
     STELLAR_NETWORK_PASSPHRASE: z.string().optional(),
 
-    // ── Job system ──────────────────────────────────────────────────────
+    // ── Job system ──────────────────────────────────────────────
     JOB_WORKER_CONCURRENCY: positiveInt(2),
     JOB_QUEUE_POLL_INTERVAL_MS: positiveInt(250),
     JOB_HISTORY_LIMIT: positiveInt(50),
     ENABLE_JOB_SCHEDULER: z.string().optional(),
 
-    // ── ETL ─────────────────────────────────────────────────────────────
+    // ── ETL ─────────────────────────────────────────────────────
     ETL_INTERVAL_MINUTES: positiveInt(5),
     ENABLE_ETL_WORKER: z.string().optional(),
     ETL_BACKFILL_FROM: z.string().optional(),
     ETL_BACKFILL_TO: z.string().optional(),
 
-    // ── Security thresholds ─────────────────────────────────────────────
+    // ── Security thresholds ─────────────────────────────────────
     SECURITY_RATE_LIMIT_WINDOW_MS: positiveInt(60_000),
     SECURITY_RATE_LIMIT_MAX_REQUESTS: positiveInt(120),
     SECURITY_SUSPICIOUS_WINDOW_MS: positiveInt(300_000),
@@ -109,7 +110,7 @@ export const envSchema = z
     SECURITY_FAILED_LOGIN_BURST_THRESHOLD: positiveInt(5),
     SECURITY_ALERT_COOLDOWN_MS: positiveInt(300_000),
 
-    // ── Deadline / Analytics schedulers ─────────────────────────────────
+    // ── Deadline / Analytics schedulers ─────────────────────────
     DEADLINE_CHECK_INTERVAL_MS: positiveInt(60_000),
     ANALYTICS_RECOMPUTE_INTERVAL_MS: positiveInt(300_000),
   })

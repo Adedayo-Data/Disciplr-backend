@@ -228,4 +228,12 @@ describe('CORS middleware (integration)', () => {
     expect(allowedHeaders).toContain('Content-Type')
     expect(allowedHeaders).toContain('Authorization')
   })
+
+  it('allows origin with trailing slash matching normalized allowlist entry', async () => {
+    const res = await request(app)
+      .get('/api/health')
+      .set('Origin', 'http://localhost:3000/')
+
+    expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000/')
+  })
 })

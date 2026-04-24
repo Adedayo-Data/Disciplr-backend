@@ -26,7 +26,7 @@ export function parseCorsOrigins(value: string | undefined, env: string): string
     if (value.trim() === '*') return '*'
     return value
       .split(',')
-      .map((origin) => origin.trim())
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
       .filter(Boolean)
   }
 
