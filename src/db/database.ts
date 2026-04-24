@@ -15,13 +15,29 @@ if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true })
 }
 
-export const db: DatabaseType = new Database(dbPath)
+let _db: DatabaseType | null = null
 
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL')
+function getDb(): DatabaseType {
+  if (!_db) {
+    _db = new Database(dbPath)
+    // Enable WAL mode for better performance
+    _db.pragma('journal_mode = WAL')
+  }
+  return _db
+}
+
+export const db: DatabaseType = new Proxy({} as DatabaseType, {
+  get(target, prop, receiver) {
+    return Reflect.get(getDb(), prop, receiver)
+  },
+  apply(target, thisArg, argumentsList) {
+    return Reflect.apply(getDb() as any, thisArg, argumentsList)
+  }
+})
 
 // Initialize database schema
 export function initializeDatabase(): void {
+    const db = getDb()
     // Create vaults table
     db.exec(`
     CREATE TABLE IF NOT EXISTS vaults (
@@ -75,6 +91,7 @@ export function initializeDatabase(): void {
 
 // Function to update analytics summary (can be called after vault changes)
 export function updateAnalyticsSummary(): void {
+    const db = getDb()
     const stats = db.prepare(`
     SELECT 
       COUNT(*) as total_vaults,

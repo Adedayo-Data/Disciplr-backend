@@ -29,17 +29,22 @@ export class VaultService {
       console.error('Error creating vault:', error);
       throw new Error('Database error during vault creation');
     }
+  }
 }
+
+const mockPrisma = {} as any
 
 // Use Prisma only when DATABASE_URL is available
 let prisma: any
-try {
-    if (process.env.DATABASE_URL) {
+if (process.env.DATABASE_URL) {
+    try {
         const { prisma: realPrisma } = await import('../lib/prisma.js')
         prisma = realPrisma
-    } else {
+    } catch {
         prisma = mockPrisma
     }
-} catch {
+} else {
     prisma = mockPrisma
 }
+
+export { prisma }
