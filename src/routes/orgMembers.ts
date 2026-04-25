@@ -1,7 +1,8 @@
-import { Router, type Request, type Response } from 'express'
+import { Router, type Request, type Response, type NextFunction } from 'express'
 import { authenticate } from '../middleware/auth.js'
 import { requireOrgAccess } from '../middleware/orgAuth.js'
 import { createAuditLog } from '../lib/audit-logs.js'
+import { AppError } from '../middleware/errorHandler.js'
 import {
   getOrgMembers,
   addOrgMember,
@@ -33,13 +34,12 @@ orgMembersRouter.post(
   '/:orgId/members',
   authenticate,
   requireOrgAccess('owner', 'admin'),
-  (req: Request, res: Response) => {
+  (req: Request, res: Response, next: NextFunction) => {
     const { orgId } = req.params
     const { userId, role } = req.body as { userId?: string; role?: string }
 
     if (!userId) {
-      res.status(400).json({ error: 'userId is required.' })
-      return
+      return next(AppError.badRequest('userId is required.'))
     }
 
     const validRoles: OrgRole[] = ['owner', 'admin', 'member']
@@ -51,8 +51,7 @@ orgMembersRouter.post(
       addOrgMember({ orgId, userId, role: assignedRole })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add member.'
-      res.status(409).json({ error: message })
-      return
+      return next(AppError.conflict(message))
     }
 
     createAuditLog({
@@ -74,19 +73,17 @@ orgMembersRouter.delete(
   '/:orgId/members/:userId',
   authenticate,
   requireOrgAccess('owner', 'admin'),
-  (req: Request, res: Response) => {
+  (req: Request, res: Response, next: NextFunction) => {
     const { orgId, userId } = req.params
 
     try {
       removeOrgMember(orgId, userId)
     } catch (err) {
       if (err instanceof LastAdminError) {
-        res.status(422).json({ error: err.message })
-        return
+        return next(AppError.unprocessable(err.message))
       }
       const message = err instanceof Error ? err.message : 'Failed to remove member.'
-      res.status(404).json({ error: message })
-      return
+      return next(AppError.notFound(message))
     }
 
     createAuditLog({
@@ -108,26 +105,23 @@ orgMembersRouter.patch(
   '/:orgId/members/:userId/role',
   authenticate,
   requireOrgAccess('owner'),
-  (req: Request, res: Response) => {
+  (req: Request, res: Response, next: NextFunction) => {
     const { orgId, userId } = req.params
     const { role } = req.body as { role?: string }
 
     const validRoles: OrgRole[] = ['owner', 'admin', 'member']
     if (!role || !validRoles.includes(role as OrgRole)) {
-      res.status(400).json({ error: `role must be one of: ${validRoles.join(', ')}.` })
-      return
+      return next(AppError.validation(`role must be one of: ${validRoles.join(', ')}.`))
     }
 
     try {
       updateOrgMemberRole(orgId, userId, role as OrgRole)
     } catch (err) {
       if (err instanceof LastAdminError) {
-        res.status(422).json({ error: err.message })
-        return
+        return next(AppError.unprocessable(err.message))
       }
       const message = err instanceof Error ? err.message : 'Failed to update role.'
-      res.status(404).json({ error: message })
-      return
+      return next(AppError.notFound(message))
     }
 
     createAuditLog({

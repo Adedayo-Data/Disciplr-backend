@@ -19,6 +19,18 @@ const config: Config = {
      },
      testMatch: ['**/tests/**/*.test.ts'],
      clearMocks: true,
+     collectCoverageFrom: [
+          'src/middleware/errorHandler.ts',
+          'src/middleware/notFound.ts',
+     ],
+     coverageThreshold: {
+          global: {
+               branches: 95,
+               functions: 95,
+               lines: 95,
+               statements: 95,
+          },
+     },
 }
 
 export default config
