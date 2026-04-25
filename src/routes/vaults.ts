@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express'
-import { authenticate } from '../middleware/auth.middleware.js'
+import { authenticate } from '../middleware/auth.js'
 import { UserRole } from '../types/user.js'
 import { VaultService } from '../services/vault.service.js'
 import { applyFilters, applySort, paginateArray } from '../utils/pagination.js'
@@ -160,12 +160,34 @@ vaultsRouter.post('/:id/cancel', authenticate, async (req, res) => {
     return res.status(403).json({ error: 'Forbidden' })
   }
 
+  // Capture previous status before cancellation
+  const previousStatus = existingVault.status
+  const cancellationReason = req.body.reason || 'User requested cancellation'
+
   try {
     await VaultService.updateVaultStatus(req.params.id, 'cancelled' as any)
   } catch (_err) { /* non-fatal */ }
 
   const arrayIndex = vaults.findIndex((v) => v.id === req.params.id)
-  if (arrayIndex !== -1) vaults[arrayIndex].status = 'cancelled'
+  if (arrayIndex !== -1) {
+    vaults[arrayIndex].status = 'cancelled'
+  }
+
+  // Create audit log entry for vault cancellation
+  createAuditLog({
+    actor_user_id: actorUserId,
+    action: 'vault.cancelled',
+    target_type: 'vault',
+    target_id: req.params.id,
+    metadata: {
+      previous_status: previousStatus,
+      new_status: 'cancelled',
+      reason: cancellationReason,
+      cancelled_by: actorRole === UserRole.ADMIN ? 'admin' : 'creator',
+      creator: existingVault.creator,
+      amount: existingVault.amount,
+    },
+  })
 
   updateAnalyticsSummary()
   res.status(200).json({ message: 'Vault cancelled', id: req.params.id })
