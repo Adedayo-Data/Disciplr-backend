@@ -173,6 +173,12 @@ The backend includes abuse-oriented security instrumentation middleware.
   - `security.failed_login_attempt`
   - `security.rate_limit_triggered`
   - `security.suspicious_pattern`
+- Suspicious pattern alerts are de-duplicated per source IP and pattern category for
+  `SECURITY_ALERT_COOLDOWN_MS`; suppressed repeats do not increment the
+  `suspiciousPatterns` counters in the security snapshot.
+- Failed-login tracking includes `401` and `403` responses on auth/login paths.
+  Rate-limit triggers are not de-duplicated; each `429` increments
+  `rateLimitTriggers`.
 
 ### Thresholds (env-configurable)
 
