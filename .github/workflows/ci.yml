@@ -48,3 +48,11 @@ jobs:
 
       - name: Migration status
         run: npm run migrate:status
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run performance smoke tests
+        run: npm run test:perf
+        env:
+          NODE_ENV: test
