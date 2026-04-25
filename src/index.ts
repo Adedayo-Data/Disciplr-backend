@@ -33,6 +33,7 @@ import {
 } from './security/abuse-monitor.js'
 import { initializeDatabase } from './db/database.js'
 import { etlWorker } from './services/etlWorker.js'
+import { mountVersionedRoute } from './middleware/versioning.js'
 
 const PORT = process.env.PORT ?? 3000
 const jobSystem = new BackgroundJobSystem()
@@ -45,23 +46,23 @@ initializeDatabase()
 app.use(securityMetricsMiddleware)
 app.use(securityRateLimitMiddleware)
 
-app.use('/api/health', healthRateLimiter, createHealthRouter(jobSystem))
-app.use('/api/jobs', createJobsRouter(jobSystem))
-app.use('/api/vaults', vaultsRateLimiter, vaultsRouter)
-app.use('/api/vaults/:vaultId/milestones', milestonesRouter)
-app.use('/api/auth', authRouter)
-app.use('/api/exports', createExportRouter([]))
-app.use('/api/transactions', transactionsRouter)
-app.use('/api/analytics', analyticsRouter)
-app.use('/api/privacy', privacyRouter)
-app.use('/api/organizations', orgVaultsRouter)
-app.use('/api/organizations', orgAnalyticsRouter)
-app.use('/api/organizations', orgMembersRouter)
-app.use('/api/admin', adminRouter)
-app.use('/api/admin/verifiers', adminVerifiersRouter)
-app.use('/api/verifications', verificationsRouter)
-app.use('/api/api-keys', apiKeysRouter)
-app.use('/api/notifications', notificationsRouter)
+mountVersionedRoute(app, '/api/health', '/api/v1/health', healthRateLimiter, createHealthRouter(jobSystem))
+mountVersionedRoute(app, '/api/jobs', '/api/v1/jobs', createJobsRouter(jobSystem))
+mountVersionedRoute(app, '/api/vaults', '/api/v1/vaults', vaultsRateLimiter, vaultsRouter)
+mountVersionedRoute(app, '/api/vaults/:vaultId/milestones', '/api/v1/vaults/:vaultId/milestones', milestonesRouter)
+mountVersionedRoute(app, '/api/auth', '/api/v1/auth', authRouter)
+mountVersionedRoute(app, '/api/exports', '/api/v1/exports', createExportRouter([]))
+mountVersionedRoute(app, '/api/transactions', '/api/v1/transactions', transactionsRouter)
+mountVersionedRoute(app, '/api/analytics', '/api/v1/analytics', analyticsRouter)
+mountVersionedRoute(app, '/api/privacy', '/api/v1/privacy', privacyRouter)
+mountVersionedRoute(app, '/api/organizations', '/api/v1/organizations', orgVaultsRouter)
+mountVersionedRoute(app, '/api/organizations', '/api/v1/organizations', orgAnalyticsRouter)
+mountVersionedRoute(app, '/api/organizations', '/api/v1/organizations', orgMembersRouter)
+mountVersionedRoute(app, '/api/admin', '/api/v1/admin', adminRouter)
+mountVersionedRoute(app, '/api/admin/verifiers', '/api/v1/admin/verifiers', adminVerifiersRouter)
+mountVersionedRoute(app, '/api/verifications', '/api/v1/verifications', verificationsRouter)
+mountVersionedRoute(app, '/api/api-keys', '/api/v1/api-keys', apiKeysRouter)
+mountVersionedRoute(app, '/api/notifications', '/api/v1/notifications', notificationsRouter)
 
 // Catch-all 404 and uniform error shape – must be registered after all routes.
 app.use(notFound)
