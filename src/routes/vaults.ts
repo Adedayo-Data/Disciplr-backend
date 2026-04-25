@@ -9,6 +9,7 @@ import {
   getIdempotentResponse,
   hashRequestPayload,
   saveIdempotentResponse,
+  IdempotencyConflictError,
 } from '../services/idempotency.js'
 import { buildVaultCreationPayload } from '../services/soroban.js'
 import { createVaultWithMilestones, getVaultById, listVaults, cancelVaultById } from '../services/vaultStore.js'

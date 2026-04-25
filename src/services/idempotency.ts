@@ -1,5 +1,56 @@
 import { Knex } from 'knex'
 import { ParsedEvent } from '../types/horizonSync.js'
+import crypto from 'crypto'
+
+/**
+ * Error thrown when idempotency key exists but with different payload hash
+ */
+export class IdempotencyConflictError extends Error {
+  constructor(message = 'Idempotency key conflict') {
+    super(message)
+    this.name = 'IdempotencyConflictError'
+  }
+}
+
+/**
+ * Hash a request payload for idempotency checks
+ */
+export function hashRequestPayload(payload: unknown): string {
+  const str = JSON.stringify(payload)
+  return crypto.createHash('sha256').update(str).digest('hex')
+}
+
+/**
+ * Get cached idempotent response if it exists and matches the hash
+ */
+export async function getIdempotentResponse<T>(
+  key: string,
+  requestHash: string
+): Promise<T | null> {
+  const store = getIdempotencyStore()
+  const cached = store.get(key)
+
+  if (!cached) return null
+
+  if (cached.requestHash !== requestHash) {
+    throw new IdempotencyConflictError('Idempotency key exists with different payload')
+  }
+
+  return cached.response as T
+}
+
+/**
+ * Save a response for idempotency caching
+ */
+export async function saveIdempotentResponse<T>(
+  key: string,
+  requestHash: string,
+  _vaultId: string,
+  response: T
+): Promise<void> {
+  const store = getIdempotencyStore()
+  store.set(key, { requestHash, response, createdAt: new Date() })
+}
 
 /**
  * Idempotency Service
@@ -75,4 +126,15 @@ export class IdempotencyService {
       created_at: new Date()
     })
   }
+}
+
+// In-memory store for non-database idempotency (used in tests)
+const idempotencyStore = new Map<string, any>()
+
+export function resetIdempotencyStore(): void {
+  idempotencyStore.clear()
+}
+
+export function getIdempotencyStore(): Map<string, any> {
+  return idempotencyStore
 }
