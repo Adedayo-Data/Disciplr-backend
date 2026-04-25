@@ -186,7 +186,7 @@ export class EventProcessor {
           creator: payload.creator!,
           amount: payload.amount!,
           start_timestamp: payload.startTimestamp!,
-          end_timestamp: payload.endTimestamp!,
+          end_date: payload.endTimestamp!,
           success_destination: payload.successDestination!,
           failure_destination: payload.failureDestination!,
           status: payload.status || 'active',

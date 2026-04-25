@@ -108,6 +108,16 @@ describe('Jobs API', () => {
         expect(res.body).toHaveProperty('error')
       })
     }
+
+    it('POST /api/jobs/enqueue – 403 for USER role attempting deadline.check', async () => {
+      const res = await request(testApp)
+        .post('/api/jobs/enqueue')
+        .set('Authorization', `Bearer ${userToken}`)
+        .send(validBodies['deadline.check'])
+
+      expect(res.status).toBe(403)
+      expect(res.body).toHaveProperty('error')
+    })
   })
 
   // -------------------------------------------------------------------------
