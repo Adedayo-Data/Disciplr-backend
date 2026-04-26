@@ -26,7 +26,11 @@ export interface DbState {
 export async function setupTestDatabase(): Promise<Knex> {
   const db = knex({
     client: 'pg',
-    connection: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/disciplr_test'
+    connection: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/disciplr_test',
+    migrations: {
+      directory: './db/migrations',
+      extension: 'cjs'
+    }
   })
 
   // Run migrations to ensure schema is up to date
@@ -127,7 +131,7 @@ export async function insertTestVault(
     creator: overrides.creator || 'GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
     amount: overrides.amount || '1000.0000000',
     start_timestamp: overrides.startTimestamp || new Date('2024-01-01'),
-    end_timestamp: overrides.endTimestamp || new Date('2024-12-31'),
+    end_date: overrides.endTimestamp || new Date('2024-12-31'),
     success_destination: overrides.successDestination || 'GSUCCESSXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
     failure_destination: overrides.failureDestination || 'GFAILUREXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
     status: overrides.status || 'active',
