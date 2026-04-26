@@ -12,10 +12,14 @@
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:api-keys": "tsx --test src/routes/apiKeys.test.ts",
     "test:vaults": "tsx --test src/routes/vaults.test.ts",
+    "test:smoke": "tsx --test src/tests/smoke/api.smoke.test.ts",
     "migrate:make": "knex migrate:make --knexfile knexfile.cjs --migrations-directory db/migrations --extension cjs",
     "migrate:latest": "knex migrate:latest --knexfile knexfile.cjs",
     "migrate:rollback": "knex migrate:rollback --knexfile knexfile.cjs",
-    "migrate:status": "knex migrate:status --knexfile knexfile.cjs"
+    "migrate:status": "knex migrate:status --knexfile knexfile.cjs",
+    "openapi:generate": "tsx src/docs/generate-spec.ts",
+    "openapi:lint": "redocly lint docs/openapi.yaml",
+    "openapi:validate": "redocly stats docs/openapi.yaml"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2",
@@ -33,7 +37,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "^8.5.0",
     "@eslint/js": "^9.13.0",
+    "@redocly/cli": "^2.29.2",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",
@@ -55,6 +61,7 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "yaml": "^2.8.3"
   }
 }

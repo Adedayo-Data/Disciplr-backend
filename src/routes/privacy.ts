@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express'
 import { utcNow } from '../utils/timestamps.js'
 import { prisma } from '../lib/prisma.js'
+import { authenticate } from '../middleware/auth.js'
 
 export const privacyRouter = Router()
 
@@ -8,7 +9,7 @@ export const privacyRouter = Router()
  * GET /api/privacy/export?creator=<USER_ID>
  * Exports all data related to a specific creator.
  */
-privacyRouter.get('/export', async (req: Request, res: Response) => {
+privacyRouter.get('/export', authenticate, async (req: Request, res: Response) => {
     const creator = req.query.creator as string
 
     if (!creator) {
@@ -21,7 +22,7 @@ privacyRouter.get('/export', async (req: Request, res: Response) => {
             where: { creatorId: creator },
             include: {
                 creator: {
-                    select: { id: true, email: true }
+                    select: { id: true}
                 }
             }
         })
@@ -42,7 +43,7 @@ privacyRouter.get('/export', async (req: Request, res: Response) => {
  * DELETE /api/privacy/account?creator=<USER_ID>
  * Deletes all records associated with a specific creator.
  */
-privacyRouter.delete('/account', async (req: Request, res: Response) => {
+privacyRouter.delete('/account', authenticate, async (req: Request, res: Response) => {
     const creator = creatorIdFromQuery(req)
 
     if (!creator) {
@@ -61,7 +62,7 @@ privacyRouter.delete('/account', async (req: Request, res: Response) => {
         }
 
         res.json({
-            message: `Account data for creator ${creator} has been deleted.`,
+            message: 'Account data has been deleted.',
             deletedCount: deleteResult.count,
             status: 'success'
         })
