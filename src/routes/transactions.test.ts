@@ -21,7 +21,7 @@ describe('Transactions API', () => {
       creator: 'GTEST1234567890123456789012345678901234567890123456789012345678901',
       amount: '100.0000000',
       start_timestamp: new Date(),
-      end_timestamp: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       success_destination: 'GDEST1234567890123456789012345678901234567890123456789012345678901',
       failure_destination: 'GFAIL1234567890123456789012345678901234567890123456789012345678901',
       status: 'active',
@@ -94,15 +94,60 @@ describe('Transactions API', () => {
       expect(response.body.data.every((tx: any) => tx.vault_id === testVaultId)).toBe(true)
     })
 
-    it('should paginate results', async () => {
+    it('should paginate results using page parameter', async () => {
       const response = await request(app)
-        .get('/api/transactions?limit=1&offset=0')
+        .get('/api/transactions?page=1&limit=1')
         .set('x-user-id', testUserId)
         .expect(200)
 
       expect(response.body.pagination.limit).toBe(1)
-      expect(response.body.pagination.offset).toBe(0)
+      expect(response.body.pagination.page).toBe(1)
       expect(response.body.data.length).toBeLessThanOrEqual(1)
+    })
+
+    it('should maintain stable ordering for identical timestamps', async () => {
+      const now = new Date()
+      // Insert two transactions with the same timestamp
+      await db('transactions').insert([
+        {
+          user_id: testUserId,
+          vault_id: testVaultId,
+          tx_hash: 'same_ts_1',
+          type: 'creation',
+          amount: '10.00',
+          from_account: 'GFROM',
+          to_account: 'GTO',
+          stellar_ledger: 100,
+          stellar_timestamp: now,
+          explorer_url: 'http://example.com/1'
+        },
+        {
+          user_id: testUserId,
+          vault_id: testVaultId,
+          tx_hash: 'same_ts_2',
+          type: 'creation',
+          amount: '20.00',
+          from_account: 'GFROM',
+          to_account: 'GTO',
+          stellar_ledger: 100,
+          stellar_timestamp: now,
+          explorer_url: 'http://example.com/2'
+        }
+      ])
+
+      const res = await request(app)
+        .get('/api/transactions?limit=10')
+        .set('x-user-id', testUserId)
+        .expect(200)
+
+      const sameTsItems = res.body.data.filter((tx: any) => tx.tx_hash.startsWith('same_ts_'))
+      expect(sameTsItems.length).toBe(2)
+      
+      // Should be ordered by ID (UUID) descending since timestamps are identical
+      // We can't easily predict UUID order without knowing them, but we can verify consistency
+      const order = sameTsItems.map((tx: any) => tx.id)
+      const sortedOrder = [...order].sort().reverse()
+      expect(order).toEqual(sortedOrder)
     })
 
     it('should require authentication', async () => {

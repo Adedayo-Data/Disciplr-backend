@@ -79,7 +79,7 @@ describe('Event Processor Idempotency', () => {
       creator: 'GCREATOR',
       amount: '100',
       start_timestamp: new Date(),
-      end_timestamp: new Date(Date.now() + 100000),
+      end_date: new Date(Date.now() + 100000),
       success_destination: 'GSUCCESS',
       failure_destination: 'GFAIL',
       status: 'active',

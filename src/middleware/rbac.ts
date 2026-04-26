@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { UserRole } from '../types/user.js'
+import { getVerifierProfile } from '../services/verifiers.js'
 
 type RBACOptions = {
   allow: UserRole[];
@@ -44,6 +45,14 @@ export const enforceRBAC = (options: RBACOptions) => {
 };
 
 // Convenience
+export const requireUser = enforceRBAC({
+  allow: [UserRole.USER, UserRole.VERIFIER, UserRole.ADMIN],
+})
+
+export const requireVerifier = enforceRBAC({
+  allow: [UserRole.VERIFIER, UserRole.ADMIN],
+})
+
 export const requireAdmin = enforceRBAC({
   allow: [UserRole.ADMIN],
 });

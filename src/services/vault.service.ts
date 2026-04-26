@@ -8,13 +8,13 @@ export class VaultService {
   static async createVault(data: CreateVaultDTO): Promise<Vault> {
     const query = `
       INSERT INTO vaults (
-        contract_id, creator_address, amount, milestone_hash, 
+        contract_id, creator_address, amount, milestone_hash,
         verifier_address, success_destination, failure_destination, deadline
-      ) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) 
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *;
     `;
-    
+
     const values = [
       data.contractId, data.creatorAddress, data.amount, data.milestoneHash,
       data.verifierAddress, data.successDestination, data.failureDestination, data.deadline
@@ -41,3 +41,5 @@ export class VaultService {
     return null
   }
 }
+
+export { prisma }

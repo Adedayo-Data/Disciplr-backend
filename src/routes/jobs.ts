@@ -7,7 +7,7 @@ import {
   type JobPayloadByType,
   type JobType,
 } from '../jobs/types.js'
-import { authenticate, authorize } from '../middleware/auth.middleware.js'
+import { authenticate, authorize } from '../middleware/auth.js'
 import { strictRateLimiter } from '../middleware/rateLimiter.js'
 import { createAuditLog } from '../lib/audit-logs.js'
 import { formatValidationError } from '../lib/validation.js'

@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { requireUserAuth } from '../middleware/userAuth.js'
+import { apiKeyRateLimiter } from '../middleware/rateLimiter.js'
 import { createApiKey, listApiKeysForUser, revokeApiKey } from '../services/apiKeys.js'
 import { formatValidationError } from '../lib/validation.js'
 
@@ -21,7 +22,7 @@ apiKeysRouter.get('/', (req, res) => {
   res.json({ apiKeys })
 })
 
-apiKeysRouter.post('/', (req, res) => {
+apiKeysRouter.post('/', apiKeyRateLimiter, (req, res) => {
   const userId = req.authUser!.userId
   const parseResult = createApiKeySchema.safeParse(req.body)
   if (!parseResult.success) {

@@ -37,6 +37,7 @@ export const db: DatabaseType = (() => {
 
 // Initialize database schema
 export function initializeDatabase(): void {
+    const db = getDb()
     // Create vaults table
     db.exec(`
     CREATE TABLE IF NOT EXISTS vaults (
@@ -96,6 +97,7 @@ export function closeDatabase(): void {
 
 // Function to update analytics summary (can be called after vault changes)
 export function updateAnalyticsSummary(): void {
+    const db = getDb()
     const stats = db.prepare(`
     SELECT 
       COUNT(*) as total_vaults,
