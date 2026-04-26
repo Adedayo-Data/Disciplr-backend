@@ -20,6 +20,8 @@ import { vaultsRouter, setVaults } from '../src/routes/vaults.js'
 import { resetVaultStore } from '../src/services/vaultStore.js'
 import { resetIdempotencyStore } from '../src/services/idempotency.js'
 
+const otherUserToken = generateAccessToken({ userId: 'other-vault-user', role: UserRole.USER })
+
 // ─── Test app ────────────────────────────────────────────────────────────────
 
 const testApp = express()
@@ -585,6 +587,129 @@ describe('POST /api/vaults', () => {
       .expect(409)
 
     expect(conflict.body).toHaveProperty('error')
+  })
+
+  // ── Idempotency key format validation ─────────────────────────────────────
+
+  it('returns 400 with INVALID_IDEMPOTENCY_KEY for an empty key header', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', '')
+      .send(validPayload())
+      .expect(400)
+
+    expect(res.body.error.code).toBe('INVALID_IDEMPOTENCY_KEY')
+    expect(typeof res.body.error.message).toBe('string')
+  })
+
+  it('returns 400 with INVALID_IDEMPOTENCY_KEY for a key with spaces', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', 'invalid key with spaces')
+      .send(validPayload())
+      .expect(400)
+
+    expect(res.body.error.code).toBe('INVALID_IDEMPOTENCY_KEY')
+  })
+
+  it('returns 400 with INVALID_IDEMPOTENCY_KEY for a key with special characters', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', 'key@value!')
+      .send(validPayload())
+      .expect(400)
+
+    expect(res.body.error.code).toBe('INVALID_IDEMPOTENCY_KEY')
+  })
+
+  it('returns 400 with INVALID_IDEMPOTENCY_KEY for a key exceeding 255 characters', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', 'a'.repeat(256))
+      .send(validPayload())
+      .expect(400)
+
+    expect(res.body.error.code).toBe('INVALID_IDEMPOTENCY_KEY')
+  })
+
+  it('accepts a UUID-formatted idempotency key', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', '550e8400-e29b-41d4-a716-446655440000')
+      .send(validPayload())
+      .expect(201)
+
+    expect(res.body.idempotency.replayed).toBe(false)
+  })
+
+  it('returns 409 with IDEMPOTENCY_CONFLICT code on payload mismatch', async () => {
+    const key = 'conflict-key-structured'
+
+    await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', key)
+      .send(validPayload())
+      .expect(201)
+
+    const res = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', key)
+      .send({ ...validPayload(), amount: '500' })
+      .expect(409)
+
+    expect(res.body.error.code).toBe('IDEMPOTENCY_CONFLICT')
+    expect(typeof res.body.error.message).toBe('string')
+  })
+
+  // ── Cross-user key isolation ───────────────────────────────────────────────
+
+  it('isolates idempotency keys between different users', async () => {
+    const key = 'shared-key-cross-user'
+
+    const res1 = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .set('idempotency-key', key)
+      .send(validPayload())
+      .expect(201)
+
+    // Different user, same key, different payload – must not return 409
+    const res2 = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('idempotency-key', key)
+      .send({ ...validPayload(), amount: '500' })
+      .expect(201)
+
+    expect(res2.body.vault.id).not.toBe(res1.body.vault.id)
+  })
+
+  it('replays correctly for the original user after cross-user creation', async () => {
+    const key = 'shared-key-replay-check'
+
+    await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('idempotency-key', key)
+      .send(validPayload())
+      .expect(201)
+
+    // Same user + same key + same payload → replay
+    const res = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .set('idempotency-key', key)
+      .send(validPayload())
+      .expect(200)
+
+    expect(res.body.idempotency.replayed).toBe(true)
   })
 })
 

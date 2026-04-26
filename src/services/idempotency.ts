@@ -10,15 +10,49 @@ interface StoredIdempotentResponse<T = unknown> {
 
 const apiIdempotencyStore = new Map<string, StoredIdempotentResponse>()
 
+// Accepts alphanumeric, hyphens, underscores; 1–255 characters.
+export const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9_\-]{1,255}$/
+
 export class IdempotencyConflictError extends Error {
+  readonly code = 'IDEMPOTENCY_CONFLICT'
   constructor(message = 'Idempotency key has already been used with a different payload.') {
     super(message)
     this.name = 'IdempotencyConflictError'
   }
 }
 
+export class IdempotencyKeyValidationError extends Error {
+  readonly code = 'INVALID_IDEMPOTENCY_KEY'
+  constructor(
+    message = 'Idempotency key must be 1–255 characters and contain only letters, digits, hyphens, and underscores.',
+  ) {
+    super(message)
+    this.name = 'IdempotencyKeyValidationError'
+  }
+}
+
+export const validateIdempotencyKey = (key: string): void => {
+  if (!IDEMPOTENCY_KEY_REGEX.test(key)) {
+    throw new IdempotencyKeyValidationError()
+  }
+}
+
+// Recursively sort object keys so identical payloads with different property
+// ordering produce the same hash.
+const sortKeys = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(sortKeys)
+  if (value !== null && typeof value === 'object') {
+    const sorted: Record<string, unknown> = {}
+    for (const k of Object.keys(value as object).sort()) {
+      sorted[k] = sortKeys((value as Record<string, unknown>)[k])
+    }
+    return sorted
+  }
+  return value
+}
+
 export const hashRequestPayload = (payload: unknown): string => {
-  return createHash('sha256').update(JSON.stringify(payload ?? null)).digest('hex')
+  return createHash('sha256').update(JSON.stringify(sortKeys(payload ?? null))).digest('hex')
 }
 
 export const getIdempotentResponse = async <T>(
