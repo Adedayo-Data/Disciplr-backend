@@ -73,7 +73,7 @@ export const markVaultExpiries = async (): Promise<number> => {
       user_id: vault.creator,
       type: 'vault_failure',
       title: 'Vault Deadline Reached',
-      message: `Vault ${vault.id} has expired and been marked as failed.`,
+      message: 'A vault in your account has expired and been marked as failed.',
       data: { vaultId: vault.id }
     })
   }
