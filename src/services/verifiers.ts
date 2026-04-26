@@ -1,3 +1,4 @@
+import { createAuditLog, AuditLog } from '../lib/audit-logs.js'
 import { db } from '../db/knex.js'
 
 export type VerifierStatus = 'pending' | 'approved' | 'suspended'
@@ -18,6 +19,7 @@ export interface VerifierProfile {
   createdAt: string
   approvedAt?: string | null
   suspendedAt?: string | null
+  deactivatedAt?: string | null
 }
 
 export interface VerificationRecord {
@@ -29,22 +31,60 @@ export interface VerificationRecord {
   timestamp: string
 }
 
+export type VerifierMutationContext = {
+  actorUserId: string
+  reason?: string
+}
+
+export type VerifierMutationResult = {
+  before: VerifierProfile | null
+  after: VerifierProfile
+  changedFields: string[]
+  auditLog: AuditLog | null
+}
+
+const transitionMatrix: Record<VerifierStatus, VerifierStatus[]> = {
+  pending: ['pending', 'approved', 'deactivated'],
+  approved: ['approved', 'suspended', 'deactivated'],
+  suspended: ['suspended', 'approved', 'deactivated'],
+  deactivated: ['deactivated', 'pending'],
+}
+
+export const canTransition = (from: VerifierStatus, to: VerifierStatus): boolean =>
+  transitionMatrix[from]?.includes(to) === true
+
 export const createVerifierProfile = async (
   userId: string,
-  opts?: { displayName?: string; metadata?: Record<string, unknown>; status?: VerifierStatus },
-): Promise<VerifierProfile> => {
-  const updates = mapStatusToUpdates(opts?.status ?? 'pending')
+  opts: { displayName?: string; metadata?: Record<string, unknown>; status?: VerifierStatus } | undefined,
+  context: VerifierMutationContext,
+): Promise<VerifierMutationResult> => {
+  return db.transaction(async (trx) => {
+    const status = opts?.status ?? 'pending'
+    const [inserted] = await trx('verifiers')
+      .insert({
+        user_id: userId,
+        display_name: opts?.displayName ?? null,
+        metadata: opts?.metadata ?? null,
+        ...mapStatusToUpdates(status),
+      })
+      .returning('*')
 
-  const [inserted] = await db('verifiers')
-    .insert({
-      user_id: userId,
-      display_name: opts?.displayName ?? null,
-      metadata: opts?.metadata ?? null,
-      ...updates,
+    const after = mapVerifierRow(inserted)
+    const changedFields = ['user_id', 'status']
+    if (opts?.displayName !== undefined) changedFields.push('display_name')
+    if (opts?.metadata !== undefined) changedFields.push('metadata')
+
+    const auditLog = createVerifierAuditLog({
+      action: 'verifier.created',
+      context,
+      targetId: after.userId,
+      before: null,
+      after,
+      changedFields,
     })
-    .returning('*')
 
-  return mapVerifierRow(inserted)
+    return { before: null, after, changedFields, auditLog }
+  })
 }
 
 export const createOrGetVerifierProfile = async (
@@ -54,28 +94,92 @@ export const createOrGetVerifierProfile = async (
   const existing = await db('verifiers').where({ user_id: userId }).first()
   if (existing) return mapVerifierRow(existing)
 
-  return createVerifierProfile(userId, opts)
+  if (!context) {
+    throw new Error('Verifier creation requires audit context')
+  }
+
+  return (await createVerifierProfile(userId, opts, context)).after
 }
 
 export const updateVerifierProfile = async (
   userId: string,
   updates: { displayName?: string | null; metadata?: Record<string, unknown> | null; status?: VerifierStatus },
-): Promise<VerifierProfile | null> => {
-  const current = await db('verifiers').where({ user_id: userId }).first()
-  if (!current) return null
+  context: VerifierMutationContext,
+): Promise<VerifierMutationResult | null> => {
+  return db.transaction(async (trx) => {
+    const current = await trx('verifiers').where({ user_id: userId }).first()
+    if (!current) return null
 
-  const patch: Record<string, unknown> = {}
-  if (updates.displayName !== undefined) patch.display_name = updates.displayName
-  if (updates.metadata !== undefined) patch.metadata = updates.metadata
-  if (updates.status !== undefined) Object.assign(patch, mapStatusToUpdates(updates.status))
+    const before = mapVerifierRow(current)
+    const patch: Record<string, unknown> = {}
+    if (updates.displayName !== undefined) patch.display_name = updates.displayName
+    if (updates.metadata !== undefined) patch.metadata = updates.metadata
 
-  const [updated] = await db('verifiers').where({ user_id: userId }).update(patch).returning('*')
-  return mapVerifierRow(updated)
+    if (updates.status !== undefined) {
+      if (!canTransition(before.status, updates.status)) {
+        throw new InvalidVerifierStatusTransitionError(before.status, updates.status)
+      }
+      Object.assign(patch, mapStatusToUpdates(updates.status))
+    }
+
+    const changedFields = getChangedFields(before, updates)
+    if (changedFields.length === 0) {
+      return { before, after: before, changedFields, auditLog: null }
+    }
+
+    const [updated] = await trx('verifiers').where({ user_id: userId }).update(patch).returning('*')
+    const after = mapVerifierRow(updated)
+    const action = updates.status !== undefined && before.status !== after.status
+      ? statusAction(before.status, after.status)
+      : 'verifier.updated'
+
+    if (!action) {
+      throw new Error(`Missing verifier audit action for ${before.status} -> ${after.status}`)
+    }
+
+    const auditLog = createVerifierAuditLog({
+      action,
+      context,
+      targetId: userId,
+      before,
+      after,
+      changedFields,
+    })
+
+    return { before, after, changedFields, auditLog }
+  })
 }
 
-export const deleteVerifierProfile = async (userId: string): Promise<boolean> => {
-  const deletedCount = await db('verifiers').where({ user_id: userId }).del()
-  return deletedCount > 0
+export const transitionVerifier = async (
+  userId: string,
+  status: VerifierStatus,
+  context: VerifierMutationContext,
+): Promise<VerifierMutationResult | null> =>
+  updateVerifierProfile(userId, { status }, context)
+
+export const deleteVerifierProfile = async (
+  userId: string,
+  context: VerifierMutationContext,
+): Promise<{ deleted: boolean; before: VerifierProfile | null; auditLog: AuditLog | null }> => {
+  return db.transaction(async (trx) => {
+    const current = await trx('verifiers').where({ user_id: userId }).first()
+    if (!current) return { deleted: false, before: null, auditLog: null }
+
+    const before = mapVerifierRow(current)
+    const deletedCount = await trx('verifiers').where({ user_id: userId }).del()
+    if (deletedCount === 0) return { deleted: false, before, auditLog: null }
+
+    const auditLog = createVerifierAuditLog({
+      action: 'verifier.deleted',
+      context,
+      targetId: userId,
+      before,
+      after: null,
+      changedFields: ['deleted'],
+    })
+
+    return { deleted: true, before, auditLog }
+  })
 }
 
 export const getVerifierProfile = async (userId: string): Promise<VerifierProfile | undefined> => {
@@ -171,12 +275,62 @@ export const resetVerifiers = async (): Promise<void> => {
   await db('verifiers').del()
 }
 
+export class InvalidVerifierStatusTransitionError extends Error {
+  constructor(public readonly from: VerifierStatus, public readonly to: VerifierStatus) {
+    super(`Invalid verifier status transition: ${from} -> ${to}`)
+    this.name = 'InvalidVerifierStatusTransitionError'
+  }
+}
+
+function getChangedFields(
+  before: VerifierProfile,
+  updates: { displayName?: string | null; metadata?: Record<string, unknown> | null; status?: VerifierStatus },
+): string[] {
+  const changedFields: string[] = []
+  if (updates.displayName !== undefined && before.displayName !== updates.displayName) changedFields.push('display_name')
+  if (updates.metadata !== undefined && JSON.stringify(before.metadata ?? null) !== JSON.stringify(updates.metadata ?? null)) changedFields.push('metadata')
+  if (updates.status !== undefined && before.status !== updates.status) changedFields.push('status')
+  return changedFields
+}
+
+function createVerifierAuditLog(input: {
+  action: string
+  context: VerifierMutationContext
+  targetId: string
+  before: VerifierProfile | null
+  after: VerifierProfile | null
+  changedFields: string[]
+}): AuditLog {
+  return createAuditLog({
+    actor_user_id: input.context.actorUserId,
+    action: input.action,
+    target_type: 'verifier',
+    target_id: input.targetId,
+    metadata: {
+      before: input.before,
+      after: input.after,
+      changed_fields: input.changedFields,
+      ...(input.context.reason ? { reason: input.context.reason } : {}),
+    },
+  })
+}
+
+function statusAction(from: VerifierStatus | null, to: VerifierStatus): string | null {
+  if (from === to) return null
+  if (to === 'approved') return 'verifier.approved'
+  if (to === 'suspended') return 'verifier.suspended'
+  if (to === 'deactivated') return 'verifier.deactivated'
+  if (from === 'deactivated' && to === 'pending') return 'verifier.reactivated'
+  return null
+}
+
 function mapStatusToUpdates(status: VerifierStatus): Record<string, unknown> {
   if (status === 'approved') {
     return {
       status,
       approved_at: db.fn.now(),
       suspended_at: null,
+      deactivated_at: null,
     }
   }
 
@@ -187,10 +341,18 @@ function mapStatusToUpdates(status: VerifierStatus): Record<string, unknown> {
     }
   }
 
+  if (status === 'deactivated') {
+    return {
+      status,
+      deactivated_at: db.fn.now(),
+    }
+  }
+
   return {
     status,
     approved_at: null,
     suspended_at: null,
+    deactivated_at: null,
   }
 }
 
@@ -203,6 +365,7 @@ function mapVerifierRow(row: any): VerifierProfile {
     createdAt: row.created_at?.toISOString?.() ?? row.created_at,
     approvedAt: row.approved_at?.toISOString?.() ?? row.approved_at,
     suspendedAt: row.suspended_at?.toISOString?.() ?? row.suspended_at,
+    deactivatedAt: row.deactivated_at?.toISOString?.() ?? row.deactivated_at,
   }
 }
 
