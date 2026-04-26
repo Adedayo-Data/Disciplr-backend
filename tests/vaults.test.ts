@@ -1,7 +1,7 @@
 /**
  * Vault API – Zod validation parity tests (Issue #109)
  *
- * Unit tests for createVaultSchema / flattenZodErrors, plus integration tests
+ * Unit tests for createVaultSchema / validation formatting, plus integration tests
  * for POST /api/vaults via a minimal Express app (no real DB required –
  * vaultStore falls back to in-memory when no PG pool is configured).
  */
@@ -9,10 +9,10 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import request from 'supertest'
 import { describe, it, expect, beforeEach } from '@jest/globals'
 import { generateAccessToken } from '../src/lib/auth-utils.js'
+import { flattenZodErrors } from '../src/lib/validation.js'
 import { UserRole } from '../src/types/user.js'
 import {
   createVaultSchema,
-  flattenZodErrors,
   VAULT_AMOUNT_MIN,
   VAULT_AMOUNT_MAX,
 } from '../src/services/vaultValidation.js'
@@ -114,7 +114,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('amount') && e.includes('positive number'))).toBe(true)
+      expect(errors.some((e) => e.path === 'amount' && e.message.includes('positive number'))).toBe(true)
     }
   })
 
@@ -123,7 +123,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('amount') && e.includes('positive number'))).toBe(true)
+      expect(errors.some((e) => e.path === 'amount' && e.message.includes('positive number'))).toBe(true)
     }
   })
 
@@ -132,7 +132,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('amount') && e.includes('between'))).toBe(true)
+      expect(errors.some((e) => e.path === 'amount' && e.message.includes('between'))).toBe(true)
     }
   })
 
@@ -141,7 +141,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('amount'))).toBe(true)
+      expect(errors.some((e) => e.path === 'amount')).toBe(true)
     }
   })
 
@@ -169,7 +169,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('startDate') && e.includes('ISO timestamp'))).toBe(true)
+      expect(errors.some((e) => e.path === 'startDate' && e.message.includes('ISO timestamp'))).toBe(true)
     }
   })
 
@@ -178,7 +178,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('endDate') && e.includes('ISO timestamp'))).toBe(true)
+      expect(errors.some((e) => e.path === 'endDate' && e.message.includes('ISO timestamp'))).toBe(true)
     }
   })
 
@@ -188,7 +188,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('endDate') && e.includes('greater than startDate'))).toBe(true)
+      expect(errors.some((e) => e.path === 'endDate' && e.message.includes('greater than startDate'))).toBe(true)
     }
   })
 
@@ -201,7 +201,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('endDate'))).toBe(true)
+      expect(errors.some((e) => e.path === 'endDate')).toBe(true)
     }
   })
 
@@ -212,7 +212,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('verifier') && e.includes('Stellar public key'))).toBe(true)
+      expect(errors.some((e) => e.path === 'verifier' && e.message.includes('Stellar public key'))).toBe(true)
     }
   })
 
@@ -224,7 +224,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('destinations.success') && e.includes('Stellar'))).toBe(true)
+      expect(errors.some((e) => e.path === 'destinations.success' && e.message.includes('Stellar'))).toBe(true)
     }
   })
 
@@ -236,7 +236,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('destinations.failure') && e.includes('Stellar'))).toBe(true)
+      expect(errors.some((e) => e.path === 'destinations.failure' && e.message.includes('Stellar'))).toBe(true)
     }
   })
 
@@ -260,7 +260,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('milestones') && e.includes('at least one'))).toBe(true)
+      expect(errors.some((e) => e.path === 'milestones' && e.message.includes('at least one'))).toBe(true)
     }
   })
 
@@ -274,7 +274,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('milestones[0].title') && e.includes('required'))).toBe(true)
+      expect(errors.some((e) => e.path === 'milestones[0].title' && e.message.includes('required'))).toBe(true)
     }
   })
 
@@ -288,7 +288,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('milestones[0].dueDate') && e.includes('before startDate'))).toBe(true)
+      expect(errors.some((e) => e.path === 'milestones[0].dueDate' && e.message.includes('before startDate'))).toBe(true)
     }
   })
 
@@ -300,7 +300,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('milestones[0].dueDate') && e.includes('ISO timestamp'))).toBe(true)
+      expect(errors.some((e) => e.path === 'milestones[0].dueDate' && e.message.includes('ISO timestamp'))).toBe(true)
     }
   })
 
@@ -316,7 +316,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('milestone') && e.includes('cannot exceed'))).toBe(true)
+      expect(errors.some((e) => e.path === 'milestones' && e.message.includes('cannot exceed'))).toBe(true)
     }
   })
 
@@ -340,7 +340,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.includes('milestones[0].amount') && e.includes('positive'))).toBe(true)
+      expect(errors.some((e) => e.path === 'milestones[0].amount' && e.message.includes('positive'))).toBe(true)
     }
   })
 
@@ -357,7 +357,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.startsWith('milestones[1].dueDate'))).toBe(true)
+      expect(errors.some((e) => e.path === 'milestones[1].dueDate')).toBe(true)
     }
   })
 
@@ -366,7 +366,7 @@ describe('createVaultSchema – unit', () => {
     expect(result.success).toBe(false)
     if (!result.success) {
       const errors = flattenZodErrors(result.error)
-      expect(errors.some((e) => e.startsWith('verifier '))).toBe(true)
+      expect(errors.some((e) => e.path === 'verifier')).toBe(true)
     }
   })
 })
@@ -394,15 +394,18 @@ describe('POST /api/vaults', () => {
 
   // ── Validation errors ─────────────────────────────────────────────────────
 
-  it('returns 400 with details array for negative amount', async () => {
+  it('returns 400 with structured field errors for negative amount', async () => {
     const res = await request(testApp)
       .post('/api/vaults')
       .set('Authorization', `Bearer ${userToken}`)
       .send({ ...validPayload(), amount: '-1' })
       .expect(400)
 
-    expect(Array.isArray(res.body.details)).toBe(true)
-    expect(res.body.details.some((d: string) => d.includes('amount') && d.includes('positive number'))).toBe(true)
+    expect(res.body.error.code).toBe('VALIDATION_ERROR')
+    expect(Array.isArray(res.body.error.fields)).toBe(true)
+    expect(res.body.error.fields.some((f: { path: string; message: string }) => (
+      f.path === 'amount' && f.message.includes('positive number')
+    ))).toBe(true)
   })
 
   it('returns 400 for amount exceeding Soroban upper-bound', async () => {
@@ -412,7 +415,9 @@ describe('POST /api/vaults', () => {
       .send({ ...validPayload(), amount: String(VAULT_AMOUNT_MAX + 1) })
       .expect(400)
 
-    expect(res.body.details.some((d: string) => d.includes('amount') && d.includes('between'))).toBe(true)
+    expect(res.body.error.fields.some((f: { path: string; message: string }) => (
+      f.path === 'amount' && f.message.includes('between')
+    ))).toBe(true)
   })
 
   it('returns 400 when endDate is not after startDate', async () => {
@@ -426,7 +431,7 @@ describe('POST /api/vaults', () => {
       })
       .expect(400)
 
-    expect(res.body.details.some((d: string) => d.includes('endDate'))).toBe(true)
+    expect(res.body.error.fields.some((f: { path: string }) => f.path === 'endDate')).toBe(true)
   })
 
   it('returns 400 for invalid verifier address', async () => {
@@ -436,7 +441,7 @@ describe('POST /api/vaults', () => {
       .send({ ...validPayload(), verifier: 'INVALID' })
       .expect(400)
 
-    expect(res.body.details.some((d: string) => d.includes('verifier'))).toBe(true)
+    expect(res.body.error.fields.some((f: { path: string }) => f.path === 'verifier')).toBe(true)
   })
 
   it('returns 400 for empty milestones array', async () => {
@@ -446,7 +451,7 @@ describe('POST /api/vaults', () => {
       .send({ ...validPayload(), milestones: [] })
       .expect(400)
 
-    expect(res.body.details.some((d: string) => d.includes('milestones'))).toBe(true)
+    expect(res.body.error.fields.some((f: { path: string }) => f.path === 'milestones')).toBe(true)
   })
 
   it('returns 400 when milestone amounts exceed vault amount', async () => {
@@ -462,7 +467,9 @@ describe('POST /api/vaults', () => {
       })
       .expect(400)
 
-    expect(res.body.details.some((d: string) => d.includes('milestone') && d.includes('exceed'))).toBe(true)
+    expect(res.body.error.fields.some((f: { path: string; message: string }) => (
+      f.path === 'milestones' && f.message.includes('exceed')
+    ))).toBe(true)
   })
 
   it('returns 400 for milestone dueDate before vault startDate', async () => {
@@ -477,7 +484,7 @@ describe('POST /api/vaults', () => {
       })
       .expect(400)
 
-    expect(res.body.details.some((d: string) => d.includes('milestones[0].dueDate'))).toBe(true)
+    expect(res.body.error.fields.some((f: { path: string }) => f.path === 'milestones[0].dueDate')).toBe(true)
   })
 
   it('does not include PII (Stellar addresses) in error messages', async () => {
@@ -637,6 +644,309 @@ describe('GET /api/vaults', () => {
     expect(Array.isArray(res.body.data)).toBe(true)
     expect(res.body.data[0].startDate).toMatch(/Z$/)
     expect(res.body.data[0].createdAt).toMatch(/Z$/)
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Integration tests – POST /api/vaults/:id/cancel
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('POST /api/vaults/:id/cancel', () => {
+  const adminToken = generateAccessToken({ userId: 'admin-user', role: UserRole.ADMIN })
+  const otherUserToken = generateAccessToken({ userId: 'other-user', role: UserRole.USER })
+
+  beforeEach(() => {
+    resetVaultStore()
+    resetIdempotencyStore()
+    setVaults([])
+  })
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+
+  it('returns 401 without auth token', async () => {
+    const res = await request(testApp).post('/api/vaults/nonexistent/cancel')
+    expect(res.status).toBe(401)
+    expect(res.body).toHaveProperty('error')
+  })
+
+  it('returns 401 with malformed token', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults/nonexistent/cancel')
+      .set('Authorization', 'Bearer invalid-token')
+    expect(res.status).toBe(401)
+  })
+
+  // ── Authorization ─────────────────────────────────────────────────────────
+
+  it('allows vault creator to cancel their own vault', async () => {
+    // Create a vault first
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel the vault
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Test cancellation' })
+      .expect(200)
+
+    expect(cancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  it('allows admin to cancel any vault', async () => {
+    // Create a vault as regular user
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel the vault as admin
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ reason: 'Admin cancellation' })
+      .expect(200)
+
+    expect(cancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  it('forbids non-creator, non-admin user from cancelling vault', async () => {
+    // Create a vault as one user
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Try to cancel as different user
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+    expect(cancelRes.status).toBe(403)
+    expect(cancelRes.body).toHaveProperty('error', 'Forbidden')
+  })
+
+  // ── Vault existence ───────────────────────────────────────────────────────
+
+  it('returns 404 for non-existent vault', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults/00000000-0000-0000-0000-000000000000/cancel')
+      .set('Authorization', `Bearer ${userToken}`)
+    expect(res.status).toBe(404)
+    expect(res.body).toHaveProperty('error', 'Vault not found')
+  })
+
+  // ── Double cancellation ───────────────────────────────────────────────────
+
+  it('handles double cancellation gracefully', async () => {
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel once
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'First cancellation' })
+      .expect(200)
+
+    // Cancel again - should still succeed (idempotent)
+    const secondCancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Second cancellation' })
+      .expect(200)
+
+    expect(secondCancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  // ── Cancel completed vault ─────────────────────────────────────────────────
+
+  it('allows cancelling a completed vault', async () => {
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Manually set vault to completed status
+    const vaults = await request(testApp)
+      .get(`/api/vaults/${vaultId}`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200)
+
+    // Simulate completed status by updating in-memory store
+    const vaultArray = (testApp as any)._router?.stack?.find((layer: any) => layer.route?.path === '/api/vaults')?.route?.stack?.find((layer: any) => layer.handle?.name === 'bound dispatch')?.handle?.__vaults || []
+    const vaultIndex = vaultArray.findIndex((v: any) => v.id === vaultId)
+    if (vaultIndex !== -1) {
+      vaultArray[vaultIndex].status = 'completed'
+    }
+
+    // Cancel the completed vault
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Cancelling completed vault' })
+      .expect(200)
+
+    expect(cancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  // ── Audit logging ─────────────────────────────────────────────────────────
+
+  it('creates audit log entry on successful cancellation', async () => {
+    // Import audit log utilities for testing
+    const { listAuditLogs, clearAuditLogs } = await import('../src/lib/audit-logs.js')
+    
+    // Clear existing audit logs
+    clearAuditLogs()
+
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel the vault
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Test audit logging' })
+      .expect(200)
+
+    // Check audit logs
+    const auditLogs = listAuditLogs({ target_id: vaultId })
+    expect(auditLogs).toHaveLength(1)
+    
+    const auditLog = auditLogs[0]
+    expect(auditLog).toMatchObject({
+      actor_user_id: 'vault-test-user',
+      action: 'vault.cancelled',
+      target_type: 'vault',
+      target_id: vaultId,
+    })
+    expect(auditLog.metadata).toMatchObject({
+      previous_status: 'active',
+      new_status: 'cancelled',
+      reason: 'Test audit logging',
+      cancelled_by: 'creator',
+      creator: expect.any(String),
+      amount: '1000',
+    })
+    expect(auditLog.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/)
+  })
+
+  it('uses admin identifier when admin cancels vault', async () => {
+    const { listAuditLogs, clearAuditLogs } = await import('../src/lib/audit-logs.js')
+    clearAuditLogs()
+
+    // Create a vault as regular user
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel as admin
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ reason: 'Admin cancellation' })
+      .expect(200)
+
+    // Check audit logs
+    const auditLogs = listAuditLogs({ target_id: vaultId })
+    expect(auditLogs).toHaveLength(1)
+    
+    const auditLog = auditLogs[0]
+    expect(auditLog.actor_user_id).toBe('admin-user')
+    expect(auditLog.metadata.cancelled_by).toBe('admin')
+  })
+
+  it('uses default reason when none provided', async () => {
+    const { listAuditLogs, clearAuditLogs } = await import('../src/lib/audit-logs.js')
+    clearAuditLogs()
+
+    // Create and cancel vault without reason
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200)
+
+    // Check audit logs
+    const auditLogs = listAuditLogs({ target_id: vaultId })
+    expect(auditLogs).toHaveLength(1)
+    expect(auditLogs[0].metadata.reason).toBe('User requested cancellation')
+  })
+
+  // ── Response consistency ───────────────────────────────────────────────────
+
+  it('maintains consistent response format', async () => {
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel and check response format
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Response format test' })
+      .expect(200)
+
+    // Response should match documented format
+    expect(cancelRes.body).toEqual({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+    expect(Object.keys(cancelRes.body)).toHaveLength(2)
   })
 })
 
