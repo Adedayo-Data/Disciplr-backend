@@ -166,6 +166,14 @@ describe('envSchema', () => {
       expect(result.data.HORIZON_URL).toBe('https://horizon.stellar.org')
     }
   })
+
+  it('should reject empty string CORS_ORIGINS', () => {
+    const result = envSchema.safeParse({ ...validEnv, CORS_ORIGINS: '' })
+    expect(result.success).toBe(false)
+    if (!result.success) {
+      expect(result.error.issues[0].message).toContain('cannot be empty')
+    }
+  })
 })
 
 // ── DATABASE_URL format validation ───────────────────────────────────────────

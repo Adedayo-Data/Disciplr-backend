@@ -5,6 +5,7 @@ export type AppConfig = {
   port: number
   serviceName: string
   corsOrigins: string[] | '*'
+  maxJsonBodySize: string
 }
 
 /**
@@ -29,7 +30,7 @@ export function parseCorsOrigins(value: string | undefined, env: string): string
     if (value.trim() === '*') return '*'
     return value
       .split(',')
-      .map((origin) => origin.trim())
+      .map((origin) => origin.trim().replace(/\/+$/, ''))
       .filter(Boolean)
   }
 
@@ -100,4 +101,5 @@ export const config: AppConfig = {
     _validated?.CORS_ORIGINS ?? process.env.CORS_ORIGINS,
     _env,
   ),
+  maxJsonBodySize: _validated?.MAX_JSON_BODY_SIZE ?? process.env.MAX_JSON_BODY_SIZE ?? '500kb',
 }

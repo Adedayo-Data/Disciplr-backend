@@ -1,5 +1,58 @@
 import { Knex } from 'knex'
+import { createHash } from 'node:crypto'
 import { ParsedEvent } from '../types/horizonSync.js'
+
+interface StoredIdempotentResponse<T = unknown> {
+  requestHash: string
+  resourceId: string
+  response: T
+}
+
+const apiIdempotencyStore = new Map<string, StoredIdempotentResponse>()
+
+export class IdempotencyConflictError extends Error {
+  constructor(message = 'Idempotency key has already been used with a different payload.') {
+    super(message)
+    this.name = 'IdempotencyConflictError'
+  }
+}
+
+export const hashRequestPayload = (payload: unknown): string => {
+  return createHash('sha256').update(JSON.stringify(payload ?? null)).digest('hex')
+}
+
+export const getIdempotentResponse = async <T>(
+  key: string,
+  requestHash: string,
+): Promise<T | null> => {
+  const record = apiIdempotencyStore.get(key)
+  if (!record) {
+    return null
+  }
+
+  if (record.requestHash !== requestHash) {
+    throw new IdempotencyConflictError()
+  }
+
+  return record.response as T
+}
+
+export const saveIdempotentResponse = async <T>(
+  key: string,
+  requestHash: string,
+  resourceId: string,
+  response: T,
+): Promise<void> => {
+  apiIdempotencyStore.set(key, {
+    requestHash,
+    resourceId,
+    response,
+  })
+}
+
+export const resetIdempotencyStore = (): void => {
+  apiIdempotencyStore.clear()
+}
 
 /**
  * Idempotency Service

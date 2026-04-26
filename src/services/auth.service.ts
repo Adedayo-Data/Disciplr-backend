@@ -7,21 +7,23 @@ import { recordSession } from './session.js'
 
 export class AuthService {
     static async register(input: RegisterInput) {
-        const existingUser = await prisma.user.findUnique({ where: { email: input.email } })
-        if (existingUser) {
-            throw new Error('User already exists')
+        try {
+            const hashedPassword = await hashPassword(input.password)
+            const user = await prisma.user.create({
+                data: {
+                    email: input.email,
+                    passwordHash: hashedPassword,
+                    role: input.role || UserRole.USER,
+                },
+            })
+
+            return { id: user.id, email: user.email, role: user.role }
+        } catch (error: any) {
+            if (error.code === 'P2002') {
+                throw new Error('Email already in use')
+            }
+            throw error
         }
-
-        const hashedPassword = await hashPassword(input.password)
-        const user = await prisma.user.create({
-            data: {
-                email: input.email,
-                passwordHash: hashedPassword,
-                role: input.role || UserRole.USER,
-            },
-        })
-
-        return { id: user.id, email: user.email, role: user.role }
     }
 
     static async login(input: LoginInput) {
