@@ -28,6 +28,18 @@ const nonNegativeInt = (fallback: number) =>
     });
 
 /**
+ * Validates that a string is a valid http:// or https:// URL.
+ * Used for optional URL fields — the refine only runs when a value is present.
+ */
+const httpUrl = () =>
+  z
+    .string()
+    .refine(
+      (url) => /^https?:\/\/.+/.test(url),
+      'must be a valid HTTP or HTTPS URL (e.g., https://example.com)',
+    )
+
+/**
  * Schema for all environment variables consumed by the application.
  *
  * Required variables have no default and will cause a startup failure when
@@ -134,6 +146,9 @@ export type EnvWarning = { variable: string; message: string };
  * transformed env object is returned together with any non-fatal warnings.
  * On failure the process prints structured errors and exits with code 1
  * (fail-fast).
+ *
+ * Sensitive values are never included in error output — only field names
+ * and validation messages are logged.
  *
  * @param env  Defaults to `process.env` — pass a custom record in tests.
  */
