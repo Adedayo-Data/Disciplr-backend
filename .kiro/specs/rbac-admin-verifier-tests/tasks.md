@@ -15,15 +15,15 @@ The plan follows a layered security testing approach with property-based tests f
   - Identify security assumptions and potential bypass vectors
   - _Requirements: 7.2, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5_
 
-- [-] 2. Set up enhanced test infrastructure
-  - [ ] 2.1 Create RBAC test utilities module
+- [x] 2. Set up enhanced test infrastructure
+  - [x] 2.1 Create RBAC test utilities module
     - Implement token generation functions for all roles (USER, VERIFIER, ADMIN)
     - Create invalid token generators (malformed, expired, wrong secret)
     - Build security bypass test case generators
     - Add endpoint test case generators for systematic testing
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
   
-  - [ ] 2.2 Create RBAC property-based test fixtures
+  - [x] 2.2 Create RBAC property-based test fixtures
     - Implement arbitraries for JWT payloads and user roles
     - Create malicious header generators for security bypass testing
     - Build admin and verifier endpoint generators
@@ -34,14 +34,14 @@ The plan follows a layered security testing approach with property-based tests f
     - **Property: Token generation consistency**
     - **Validates: Requirements 8.1, 8.2, 8.3**
   
-  - [ ] 2.4 Enhance test database setup for RBAC scenarios
+  - [x] 2.4 Enhance test database setup for RBAC scenarios
     - Extend existing test database helpers with RBAC-specific utilities
     - Add test user creation with controlled roles and sessions
     - Implement session management test utilities
     - _Requirements: 12.5_
 
-- [ ] 3. Implement core security invariant tests
-  - [ ] 3.1 Enhance rbac.test.ts with header isolation tests
+- [x] 3. Implement core security invariant tests
+  - [x] 3.1 Enhance rbac.test.ts with header isolation tests
     - Implement comprehensive header spoofing prevention tests
     - Add JWT-only role determination validation
     - Test various malicious header combinations
@@ -51,7 +51,7 @@ The plan follows a layered security testing approach with property-based tests f
     - **Property 1: Header isolation and security bypass prevention**
     - **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 10.1, 10.2, 10.3, 10.4, 10.5**
   
-  - [ ] 3.3 Implement authentication precedence invariant tests
+  - [x] 3.3 Implement authentication precedence invariant tests
     - Test authentication-before-authorization ordering
     - Validate 401 vs 403 status code precedence
     - Add edge cases for malformed and expired tokens
@@ -61,7 +61,7 @@ The plan follows a layered security testing approach with property-based tests f
     - **Property 5: Authentication precedence invariant**
     - **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5**
   
-  - [ ] 3.5 Implement error envelope consistency tests
+  - [x] 3.5 Implement error envelope consistency tests
     - Validate consistent JSON error response formats
     - Test error message patterns for 401 and 403 responses
     - Add validation for optional message fields
@@ -107,8 +107,8 @@ The plan follows a layered security testing approach with property-based tests f
     - Validate override operation security
     - _Requirements: 2.5_
 
-- [ ] 6. Implement verifier workflow RBAC coverage
-  - [ ] 6.1 Create verifier.rbac.test.ts with comprehensive coverage
+- [x] 6. Implement verifier workflow RBAC coverage
+  - [x] 6.1 Create verifier.rbac.test.ts with comprehensive coverage
     - Implement tests for `/api/verifications` endpoint access
     - Validate role hierarchy (VERIFIER < ADMIN) enforcement
     - Test POST access for VERIFIER and ADMIN roles
@@ -119,7 +119,7 @@ The plan follows a layered security testing approach with property-based tests f
     - **Property 3: Verifier endpoint access control**
     - **Validates: Requirements 3.1, 3.2, 3.3, 3.4, 3.5, 3.6**
   
-  - [ ] 6.3 Add verifier workflow integration tests
+  - [x] 6.3 Add verifier workflow integration tests
     - Test end-to-end verification workflow with RBAC enforcement
     - Validate milestone validation endpoint access
     - Add verification status check access control
@@ -130,8 +130,8 @@ The plan follows a layered security testing approach with property-based tests f
     - Validate error conditions in verification workflow
     - _Requirements: 3.1, 3.2, 3.3_
 
-- [ ] 7. Implement admin verifier management RBAC coverage
-  - [ ] 7.1 Create adminVerifiers.rbac.test.ts with full CRUD coverage
+- [x] 7. Implement admin verifier management RBAC coverage
+  - [x] 7.1 Create adminVerifiers.rbac.test.ts with full CRUD coverage
     - Implement tests for all `/api/admin/verifiers/*` endpoints
     - Validate admin-only access to verifier management
     - Test verifier profile lifecycle operations
@@ -141,7 +141,7 @@ The plan follows a layered security testing approach with property-based tests f
     - **Property 4: Verifier management access control**
     - **Validates: Requirements 4.1, 4.2, 4.3**
   
-  - [ ] 7.3 Add verifier CRUD operation tests
+  - [x] 7.3 Add verifier CRUD operation tests
     - Test GET, POST, PATCH, DELETE operations with RBAC
     - Validate verifier approval and suspension endpoints
     - Add verifier profile retrieval access control
@@ -197,20 +197,20 @@ The plan follows a layered security testing approach with property-based tests f
     - Validate comprehensive input coverage
     - _Requirements: 7.2, 7.3_
 
-- [ ] 11. Update documentation
-  - [ ] 11.1 Enhance docs/auth.md with comprehensive role definitions
+- [x] 11. Update documentation
+  - [x] 11.1 Enhance docs/auth.md with comprehensive role definitions
     - Document USER, VERIFIER, and ADMIN role capabilities
     - Add role hierarchy and trust model documentation
     - Include endpoint access matrix for all protected routes
     - _Requirements: 11.1, 11.2, 11.4, 11.5_
   
-  - [ ] 11.2 Document RBAC enforcement model
+  - [x] 11.2 Document RBAC enforcement model
     - Explain token-based identity and JWT-only role determination
     - Document that request headers are untrusted and ignored
     - Add security assumptions and threat model documentation
     - _Requirements: 11.2, 11.3_
   
-  - [ ] 11.3 Add test suite documentation
+  - [x] 11.3 Add test suite documentation
     - Document the comprehensive test suites and their coverage
     - Add property-based testing methodology documentation
     - Include security testing approach and bypass prevention
@@ -259,7 +259,7 @@ The plan follows a layered security testing approach with property-based tests f
     - Test failure reporting and alerting mechanisms
     - _Requirements: 12.1, 12.2, 12.3, 12.4, 12.5_
 
-- [ ] 14. Final checkpoint - Complete feature validation
+- [x] 14. Final checkpoint - Complete feature validation
   - Ensure all tests pass, documentation is updated, and CI integration works correctly. Ask the user if questions arise.
 
 ## Notes
