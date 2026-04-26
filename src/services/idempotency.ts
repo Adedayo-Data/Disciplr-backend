@@ -1,55 +1,93 @@
 import { Knex } from 'knex'
+import { createHash } from 'node:crypto'
 import { ParsedEvent } from '../types/horizonSync.js'
-import crypto from 'crypto'
+import crypto from 'node:crypto'
+import { getPgPool } from '../db/pool.js'
 
-/**
- * Error thrown when idempotency key exists but with different payload hash
- */
+interface StoredIdempotentResponse<T = unknown> {
+  requestHash: string
+  resourceId: string
+  response: T
+}
+
+const apiIdempotencyStore = new Map<string, StoredIdempotentResponse>()
+
+// Accepts alphanumeric, hyphens, underscores; 1–255 characters.
+export const IDEMPOTENCY_KEY_REGEX = /^[A-Za-z0-9_\-]{1,255}$/
+
 export class IdempotencyConflictError extends Error {
-  constructor(message = 'Idempotency key conflict') {
+  readonly code = 'IDEMPOTENCY_CONFLICT'
+  constructor(message = 'Idempotency key has already been used with a different payload.') {
     super(message)
     this.name = 'IdempotencyConflictError'
   }
 }
 
-/**
- * Hash a request payload for idempotency checks
- */
-export function hashRequestPayload(payload: unknown): string {
-  const str = JSON.stringify(payload)
-  return crypto.createHash('sha256').update(str).digest('hex')
-}
-
-/**
- * Get cached idempotent response if it exists and matches the hash
- */
-export async function getIdempotentResponse<T>(
-  key: string,
-  requestHash: string
-): Promise<T | null> {
-  const store = getIdempotencyStore()
-  const cached = store.get(key)
-
-  if (!cached) return null
-
-  if (cached.requestHash !== requestHash) {
-    throw new IdempotencyConflictError('Idempotency key exists with different payload')
+export class IdempotencyKeyValidationError extends Error {
+  readonly code = 'INVALID_IDEMPOTENCY_KEY'
+  constructor(
+    message = 'Idempotency key must be 1–255 characters and contain only letters, digits, hyphens, and underscores.',
+  ) {
+    super(message)
+    this.name = 'IdempotencyKeyValidationError'
   }
-
-  return cached.response as T
 }
 
-/**
- * Save a response for idempotency caching
- */
-export async function saveIdempotentResponse<T>(
+export const validateIdempotencyKey = (key: string): void => {
+  if (!IDEMPOTENCY_KEY_REGEX.test(key)) {
+    throw new IdempotencyKeyValidationError()
+  }
+}
+
+// Recursively sort object keys so identical payloads with different property
+// ordering produce the same hash.
+const sortKeys = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(sortKeys)
+  if (value !== null && typeof value === 'object') {
+    const sorted: Record<string, unknown> = {}
+    for (const k of Object.keys(value as object).sort()) {
+      sorted[k] = sortKeys((value as Record<string, unknown>)[k])
+    }
+    return sorted
+  }
+  return value
+}
+
+export const hashRequestPayload = (payload: unknown): string => {
+  return createHash('sha256').update(JSON.stringify(sortKeys(payload ?? null))).digest('hex')
+}
+
+export const getIdempotentResponse = async <T>(
   key: string,
   requestHash: string,
-  _vaultId: string,
-  response: T
-): Promise<void> {
-  const store = getIdempotencyStore()
-  store.set(key, { requestHash, response, createdAt: new Date() })
+): Promise<T | null> => {
+  const record = apiIdempotencyStore.get(key)
+  if (!record) {
+    return null
+  }
+
+  if (record.requestHash !== requestHash) {
+    throw new IdempotencyConflictError()
+  }
+
+  return record.response as T
+}
+
+export const saveIdempotentResponse = async <T>(
+  key: string,
+  requestHash: string,
+  resourceId: string,
+  response: T,
+): Promise<void> => {
+  apiIdempotencyStore.set(key, {
+    requestHash,
+    resourceId,
+    response,
+  })
+}
+
+export const resetIdempotencyStore = (): void => {
+  apiIdempotencyStore.clear()
 }
 
 /**
@@ -61,6 +99,21 @@ export class IdempotencyService {
 
   constructor(db: Knex) {
     this.db = db
+  }
+
+  async checkAndRecord<T>(
+    key: string,
+    requestHash: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const existing = await getIdempotentResponse<T>(key, requestHash)
+    if (existing) {
+      return existing
+    }
+
+    const result = await operation()
+    await saveIdempotentResponse(key, requestHash, 'resource-id', result)
+    return result
   }
 
   /**
@@ -96,45 +149,5 @@ export class IdempotencyService {
       created_at: new Date()
     })
   }
-
-  /**
-   * General-purpose idempotency check for API requests.
-   * Checks the idempotency_keys table.
-   * 
-   * @param key - The idempotency key provided by the client
-   * @returns Promise<any | null> - The stored response if found, null otherwise
-   */
-  async getStoredResponse(key: string): Promise<any | null> {
-    const record = await this.db('idempotency_keys')
-      .where({ key })
-      .first()
-    
-    return record ? record.response : null
-  }
-
-  /**
-   * Store a response for a given idempotency key.
-   * 
-   * @param key - The idempotency key
-   * @param response - The response payload to store
-   * @param trx - Optional transaction
-   */
-  async storeResponse(key: string, response: any, trx?: Knex.Transaction): Promise<void> {
-    await (trx || this.db)('idempotency_keys').insert({
-      key,
-      response: typeof response === 'string' ? response : JSON.stringify(response),
-      created_at: new Date()
-    })
-  }
 }
 
-// In-memory store for non-database idempotency (used in tests)
-const idempotencyStore = new Map<string, any>()
-
-export function resetIdempotencyStore(): void {
-  idempotencyStore.clear()
-}
-
-export function getIdempotencyStore(): Map<string, any> {
-  return idempotencyStore
-}

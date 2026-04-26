@@ -1,11 +1,15 @@
 import { Router, Request, Response } from 'express'
 import { authenticate } from '../middleware/auth.js'
 import { requireVerifier, requireAdmin } from '../middleware/rbac.js'
-import { recordVerification, listVerifications } from '../services/verifiers.js'
+import {
+  recordVerification,
+  listVerifications,
+} from '../services/verifiers.js'
+import { createAuditLog } from '../lib/audit-logs.js'
 
 export const verificationsRouter = Router()
 
-verificationsRouter.post('/', authenticate, requireVerifier, async (req: Request, res: Response) => {
+verificationsRouter.post('/', authenticate, requireVerifier, requireActiveVerifier, async (req: Request, res: Response) => {
   const payload = req.user!
   const verifierUserId = payload.userId
   const { targetId, result, disputed } = req.body as {
@@ -24,11 +28,43 @@ verificationsRouter.post('/', authenticate, requireVerifier, async (req: Request
     return
   }
 
-  const rec = await recordVerification(verifierUserId, targetId.trim(), result, !!disputed)
-  res.status(201).json({ verification: rec })
+  try {
+    const cleanTargetId = targetId.trim()
+
+    const rec = await recordVerification(
+      verifierUserId,
+      cleanTargetId,
+      result,
+      !!disputed
+    )
+
+    createAuditLog({
+      actor_user_id: verifierUserId,
+      action: 'verification.decision.recorded',
+      target_type: 'verification',
+      target_id: cleanTargetId,
+      metadata: {
+        result,
+        disputed: !!disputed,
+      },
+    })
+
+    res.status(201).json({ verification: rec })
+  } catch (error: any) {
+    // ✅ FIX: use name check instead of instanceof
+    if (error?.name === 'VerificationConflictError') {
+      res.status(409).json({
+        error: 'conflicting verification decision already exists',
+      })
+      return
+    }
+
+    res.status(500).json({
+      error: 'failed to record verification decision',
+    })
+  }
 })
 
-// Admin: list all verification records
 verificationsRouter.get('/', authenticate, requireAdmin, async (_req: Request, res: Response) => {
   const all = await listVerifications()
   res.json({ verifications: all })
