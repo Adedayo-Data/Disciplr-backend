@@ -28,6 +28,18 @@ const nonNegativeInt = (fallback: number) =>
     })
 
 /**
+ * Validates that a string is a valid http:// or https:// URL.
+ * Used for optional URL fields — the refine only runs when a value is present.
+ */
+const httpUrl = () =>
+  z
+    .string()
+    .refine(
+      (url) => /^https?:\/\/.+/.test(url),
+      'must be a valid HTTP or HTTPS URL (e.g., https://example.com)',
+    )
+
+/**
  * Schema for all environment variables consumed by the application.
  *
  * Required variables have no default and will cause a startup failure when
@@ -41,25 +53,81 @@ export const envSchema = z.object({
     .default('development'),
   PORT: positiveInt(3000),
   SERVICE_NAME: z.string().default('disciplr-backend'),
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+
+  // DATABASE_URL must be a valid PostgreSQL connection URL.
+  DATABASE_URL: z
+    .string()
+    .min(1, 'DATABASE_URL is required')
+    .refine(
+      (url) => /^postgres(ql)?:\/\//.test(url),
+      'DATABASE_URL must be a valid PostgreSQL connection URL (postgres:// or postgresql://)',
+    ),
 
   // ── CORS ────────────────────────────────────────────────────────────
-  CORS_ORIGINS: z.string().optional(),
+  // Must be "*" or a comma-separated list of valid http:// / https:// origins.
+  CORS_ORIGINS: z
+    .string()
+    .refine(
+      (value) => {
+        if (value.trim() === '*') return true
+        const origins = value.split(',').map((o) => o.trim()).filter(Boolean)
+        if (origins.length === 0) return false
+        return origins.every((origin) => {
+          try {
+            const url = new URL(origin)
+            return url.protocol === 'http:' || url.protocol === 'https:'
+          } catch {
+            return false
+          }
+        })
+      },
+      'CORS_ORIGINS must be "*" or a comma-separated list of valid http:// or https:// origin URLs',
+    )
+    .optional(),
 
   // ── Auth / secrets ──────────────────────────────────────────────────
-  JWT_SECRET: z.string().default('change-me-in-production'),
-  JWT_ACCESS_SECRET: z.string().default('fallback-access-secret'),
-  JWT_REFRESH_SECRET: z.string().default('fallback-refresh-secret'),
-  JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
-  JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
-  DOWNLOAD_SECRET: z.string().default('change-me-in-production'),
+  // Minimum 16 characters enforced on explicitly-provided values.
+  JWT_SECRET: z
+    .string()
+    .min(16, 'JWT_SECRET must be at least 16 characters')
+    .default('change-me-in-production'),
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(16, 'JWT_ACCESS_SECRET must be at least 16 characters')
+    .default('fallback-access-secret'),
+  JWT_REFRESH_SECRET: z
+    .string()
+    .min(16, 'JWT_REFRESH_SECRET must be at least 16 characters')
+    .default('fallback-refresh-secret'),
+
+  // Duration strings must match <number><unit> where unit is s, m, h, or d.
+  JWT_ACCESS_EXPIRES_IN: z
+    .string()
+    .regex(
+      /^\d+[smhd]$/,
+      'JWT_ACCESS_EXPIRES_IN must be a duration string (e.g., 15m, 1h, 7d, 30s)',
+    )
+    .default('15m'),
+  JWT_REFRESH_EXPIRES_IN: z
+    .string()
+    .regex(
+      /^\d+[smhd]$/,
+      'JWT_REFRESH_EXPIRES_IN must be a duration string (e.g., 15m, 1h, 7d, 30s)',
+    )
+    .default('7d'),
+  DOWNLOAD_SECRET: z
+    .string()
+    .min(16, 'DOWNLOAD_SECRET must be at least 16 characters')
+    .default('change-me-in-production'),
 
   // ── Horizon / Stellar ───────────────────────────────────────────────
-  HORIZON_URL: z.string().optional(),
+  HORIZON_URL: httpUrl().optional(),
   CONTRACT_ADDRESS: z.string().optional(),
   START_LEDGER: nonNegativeInt(0).optional(),
   RETRY_MAX_ATTEMPTS: nonNegativeInt(3),
   RETRY_BACKOFF_MS: nonNegativeInt(100),
+  HORIZON_SHUTDOWN_TIMEOUT_MS: positiveInt(30_000),
+  HORIZON_LAG_THRESHOLD: nonNegativeInt(10),
 
   // ── Soroban ─────────────────────────────────────────────────────────
   SOROBAN_CONTRACT_ID: z.string().optional(),
@@ -106,6 +174,9 @@ export type EnvWarning = { variable: string; message: string }
  * transformed env object is returned together with any non-fatal warnings.
  * On failure the process prints structured errors and exits with code 1
  * (fail-fast).
+ *
+ * Sensitive values are never included in error output — only field names
+ * and validation messages are logged.
  *
  * @param env  Defaults to `process.env` — pass a custom record in tests.
  */
