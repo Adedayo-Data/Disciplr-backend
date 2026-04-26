@@ -21,7 +21,7 @@ describe('Transactions API', () => {
       creator: 'GTEST1234567890123456789012345678901234567890123456789012345678901',
       amount: '100.0000000',
       start_timestamp: new Date(),
-      end_timestamp: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      end_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       success_destination: 'GDEST1234567890123456789012345678901234567890123456789012345678901',
       failure_destination: 'GFAIL1234567890123456789012345678901234567890123456789012345678901',
       status: 'active',
