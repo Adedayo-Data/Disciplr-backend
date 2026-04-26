@@ -6,9 +6,11 @@ import { updateAnalyticsSummary } from '../db/database.js'
 import { createAuditLog } from '../lib/audit-logs.js'
 import {
   IdempotencyConflictError,
+  IdempotencyKeyValidationError,
   getIdempotentResponse,
   hashRequestPayload,
   saveIdempotentResponse,
+  validateIdempotencyKey,
 } from '../services/idempotency.js'
 import { buildVaultCreationPayload } from '../services/soroban.js'
 import { createVaultWithMilestones, getVaultById, listVaults, cancelVaultById } from '../services/vaultStore.js'
@@ -63,20 +65,35 @@ vaultsRouter.get(
 // POST /api/vaults 
 
 vaultsRouter.post('/', authenticate, async (req: Request, res: Response) => {
-  // 1. Idempotency – replay cached response if key+hash match
+  // 1. Idempotency – validate key format, then replay cached response if key+hash match
   const idempotencyKey = req.header('idempotency-key') ?? null
-  const requestHash = hashRequestPayload(req.body)
 
-  if (idempotencyKey) {
+  if (idempotencyKey !== null) {
     try {
-      const cached = await getIdempotentResponse<VaultCreateResponse>(idempotencyKey, requestHash)
+      validateIdempotencyKey(idempotencyKey)
+    } catch (err) {
+      if (err instanceof IdempotencyKeyValidationError) {
+        res.status(400).json({ error: { code: err.code, message: err.message } })
+        return
+      }
+      throw err
+    }
+  }
+
+  const requestHash = hashRequestPayload(req.body)
+  // Scope key to the authenticated user to prevent cross-user response leakage.
+  const scopedKey = idempotencyKey !== null ? `${req.user!.userId}:${idempotencyKey}` : null
+
+  if (scopedKey !== null) {
+    try {
+      const cached = await getIdempotentResponse<VaultCreateResponse>(scopedKey, requestHash)
       if (cached !== null) {
         res.status(200).json({ ...cached, idempotency: { key: idempotencyKey, replayed: true } })
         return
       }
     } catch (err) {
       if (err instanceof IdempotencyConflictError) {
-        res.status(409).json({ error: err.message })
+        res.status(409).json({ error: { code: err.code, message: err.message } })
         return
       }
       throw err
@@ -102,8 +119,8 @@ vaultsRouter.post('/', authenticate, async (req: Request, res: Response) => {
       idempotency: { key: idempotencyKey, replayed: false },
     }
 
-    if (idempotencyKey) {
-      await saveIdempotentResponse(idempotencyKey, requestHash, vault.id, responseBody)
+    if (scopedKey !== null) {
+      await saveIdempotentResponse(scopedKey, requestHash, vault.id, responseBody)
     }
 
     const actorUserId = (req.header('x-user-id') ?? input.creator) || req.user?.userId || 'unknown'
