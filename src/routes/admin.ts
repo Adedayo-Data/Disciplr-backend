@@ -1,11 +1,15 @@
 import { Router, Request, Response } from 'express'
 import { authenticate } from '../middleware/auth.js'
 import { authorize } from '../middleware/auth.middleware.js'
+import { requireAdmin } from '../middleware/rbac.js'
+import { metricsRateLimiter } from '../middleware/rateLimiter.js'
 import { UserRole, UserStatus } from '../types/user.js'
 import { userService, DeleteResult } from '../services/user.service.js'
 import { forceRevokeUserSessions } from '../services/session.js'
 import { createAuditLog, getAuditLogById, listAuditLogs } from '../lib/audit-logs.js'
 import { cancelVaultById } from '../services/vaultStore.js'
+import { getDBHealthMetrics } from '../services/dbMetrics.js'
+import { pool } from '../db/index.js'
 
 export const adminRouter = Router()
 
@@ -383,5 +387,62 @@ adminRouter.post('/users/:id/restore', async (req, res) => {
     })
   } catch (error) {
     res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * Get database pool health metrics and slow query samples (Admin only)
+ * GET /api/admin/db/metrics
+ * Rate limited to 20 req/min for security and performance
+ */
+adminRouter.get('/db/metrics', metricsRateLimiter, (req: Request, res: Response) => {
+  try {
+    // Validate pool is available
+    if (!pool) {
+      res.status(503).json({
+        error: 'Database pool unavailable',
+        status: 'unavailable',
+      })
+      return
+    }
+
+    const metrics = getDBHealthMetrics(pool)
+
+    // Log metrics access for audit trail
+    createAuditLog({
+      actor_user_id: req.user!.userId,
+      action: 'admin.metrics.access',
+      target_type: 'database',
+      target_id: 'pool',
+      metadata: {
+        isHealthy: metrics.isHealthy,
+        warningsCount: metrics.warnings.length,
+        slowQueriesCount: metrics.slowQueries.length,
+      },
+    })
+
+    res.status(200).json({
+      data: {
+        timestamp: metrics.pool.timestamp,
+        isHealthy: metrics.isHealthy,
+        pool: {
+          available: metrics.pool.availableConnections,
+          waiting: metrics.pool.waitingClients,
+          total: metrics.pool.totalConnections,
+          capacity: metrics.pool.poolSize,
+        },
+        slowQueries: metrics.slowQueries.map((query) => ({
+          hash: query.queryHash,
+          pattern: query.queryPattern,
+          maxDurationMs: query.duration,
+          occurrences: query.count,
+          lastOccurred: query.lastOccurred,
+        })),
+        warnings: metrics.warnings,
+      },
+    })
+  } catch (error) {
+    console.error('Error retrieving DB metrics:', error)
+    res.status(500).json({ error: 'Failed to retrieve database metrics' })
   }
 })

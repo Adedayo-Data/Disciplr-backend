@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express'
 import { authenticate } from '../middleware/auth.js'
-import { requireUser, requireVerifier } from '../middleware/rbac.js'
+import { requireUser, requireVerifier, requireActiveVerifier } from '../middleware/rbac.js'
 import {
   createMilestone,
   getMilestonesByVaultId,
@@ -53,7 +53,7 @@ milestonesRouter.get('/', (req: Request, res: Response) => {
 })
 
 // PATCH /api/vaults/:vaultId/milestones/:id/verify
-milestonesRouter.patch('/:id/verify', authenticate, requireVerifier, (req: Request, res: Response) => {
+milestonesRouter.patch('/:id/verify', authenticate, requireVerifier, requireActiveVerifier, (req: Request, res: Response) => {
   const { vaultId, id } = req.params
 
   const vault = vaults.find((v) => v.id === vaultId)
