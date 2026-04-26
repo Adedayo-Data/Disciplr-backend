@@ -4,13 +4,13 @@ import { requireOrgAccess } from '../middleware/orgAuth.js'
 import { createAuditLog } from '../lib/audit-logs.js'
 import { AppError } from '../middleware/errorHandler.js'
 import {
-  getOrgMembers,
-  addOrgMember,
-  removeOrgMember,
-  updateOrgMemberRole,
+  listOrgMemberships,
+  createMembership,
+  removeMembership,
+  updateMemberRole,
   LastAdminError,
-  type OrgRole,
-} from '../models/organizations.js'
+} from '../services/membership.js'
+import type { OrgRole } from '../models/organizations.js'
 
 export const orgMembersRouter = Router()
 
@@ -21,9 +21,13 @@ orgMembersRouter.get(
   '/:orgId/members',
   authenticate,
   requireOrgAccess('owner', 'admin', 'member'),
-  (req: Request, res: Response) => {
-    const members = getOrgMembers(req.params.orgId)
-    res.json({ members })
+  async (req: Request, res: Response) => {
+    try {
+      const members = await listOrgMemberships(req.params.orgId)
+      res.json({ members })
+    } catch {
+      res.status(500).json({ error: 'Failed to list members.' })
+    }
   },
 )
 
@@ -48,21 +52,29 @@ orgMembersRouter.post(
       : 'member'
 
     try {
-      addOrgMember({ orgId, userId, role: assignedRole })
+      const membership = await createMembership({
+        user_id: userId,
+        organization_id: orgId,
+        role: assignedRole,
+      })
+
+      createAuditLog({
+        actor_user_id: req.user!.userId,
+        action: 'org.member.added',
+        target_type: 'org_membership',
+        target_id: `${orgId}:${userId}`,
+        metadata: { orgId, role: assignedRole },
+      })
+
+      res.status(201).json({
+        orgId,
+        userId,
+        role: membership.role,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add member.'
       return next(AppError.conflict(message))
     }
-
-    createAuditLog({
-      actor_user_id: req.user!.userId,
-      action: 'org.member.added',
-      target_type: 'org_membership',
-      target_id: `${orgId}:${userId}`,
-      metadata: { orgId, role: assignedRole },
-    })
-
-    res.status(201).json({ orgId, userId, role: assignedRole })
   },
 )
 
@@ -77,24 +89,25 @@ orgMembersRouter.delete(
     const { orgId, userId } = req.params
 
     try {
-      removeOrgMember(orgId, userId)
+      await removeMembership(userId, orgId)
+
+      createAuditLog({
+        actor_user_id: req.user!.userId,
+        action: 'org.member.removed',
+        target_type: 'org_membership',
+        target_id: `${orgId}:${userId}`,
+        metadata: { orgId },
+      })
+
+      res.status(200).json({ message: 'Member removed.', orgId, userId })
     } catch (err) {
       if (err instanceof LastAdminError) {
         return next(AppError.unprocessable(err.message))
       }
+
       const message = err instanceof Error ? err.message : 'Failed to remove member.'
       return next(AppError.notFound(message))
     }
-
-    createAuditLog({
-      actor_user_id: req.user!.userId,
-      action: 'org.member.removed',
-      target_type: 'org_membership',
-      target_id: `${orgId}:${userId}`,
-      metadata: { orgId },
-    })
-
-    res.status(200).json({ message: 'Member removed.', orgId, userId })
   },
 )
 
@@ -115,23 +128,28 @@ orgMembersRouter.patch(
     }
 
     try {
-      updateOrgMemberRole(orgId, userId, role as OrgRole)
+      const updated = await updateMemberRole(userId, orgId, role as OrgRole)
+
+      createAuditLog({
+        actor_user_id: req.user!.userId,
+        action: 'org.member.role_changed',
+        target_type: 'org_membership',
+        target_id: `${orgId}:${userId}`,
+        metadata: { orgId, newRole: role },
+      })
+
+      res.status(200).json({
+        orgId,
+        userId,
+        role: updated.role,
+      })
     } catch (err) {
       if (err instanceof LastAdminError) {
         return next(AppError.unprocessable(err.message))
       }
+
       const message = err instanceof Error ? err.message : 'Failed to update role.'
       return next(AppError.notFound(message))
     }
-
-    createAuditLog({
-      actor_user_id: req.user!.userId,
-      action: 'org.member.role_changed',
-      target_type: 'org_membership',
-      target_id: `${orgId}:${userId}`,
-      metadata: { orgId, newRole: role },
-    })
-
-    res.status(200).json({ orgId, userId, role })
   },
 )
