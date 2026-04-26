@@ -77,4 +77,10 @@ export const strictRateLimiter = createRateLimiter({
   message: 'Rate limit exceeded. This endpoint has strict rate limits.',
 })
 
+export const metricsRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: 'Metrics endpoint rate limit exceeded. Please try again later.',
+})
+
 export { createRateLimiter }

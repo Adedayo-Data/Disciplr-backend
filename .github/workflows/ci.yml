@@ -48,3 +48,9 @@ jobs:
 
       - name: Migration status
         run: npm run migrate:status
+
+      - name: Generate OpenAPI spec
+        run: npm run openapi:generate
+
+      - name: Validate OpenAPI spec
+        run: npm run openapi:validate
