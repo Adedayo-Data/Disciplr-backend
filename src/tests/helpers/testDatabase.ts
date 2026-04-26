@@ -1,4 +1,5 @@
 import knex, { Knex } from 'knex'
+import { UserRole } from '../../types/user.js'
 
 /**
  * Test database helpers for setting up, tearing down, and capturing database state
@@ -13,6 +14,18 @@ export interface DbState {
   processedEvents: any[]
   failedEvents: any[]
   listenerState: any[]
+  users?: any[]
+  sessions?: any[]
+  verifiers?: any[]
+}
+
+// Test user interface for RBAC testing
+export interface TestUser {
+  id: string
+  email: string
+  role: UserRole
+  status?: string
+  createdAt?: Date
 }
 
 /**
@@ -66,6 +79,16 @@ export async function cleanAllTables(db: Knex): Promise<void> {
   await db('processed_events').delete()
   await db('failed_events').delete()
   await db('listener_state').delete()
+  
+  // Clean RBAC-related tables if they exist
+  try {
+    await db('sessions').delete()
+    await db('verifiers').delete()
+    await db('users').delete()
+  } catch (error) {
+    // Tables might not exist in all test environments
+    // This is acceptable for backwards compatibility
+  }
 }
 
 /**
@@ -76,7 +99,7 @@ export async function cleanAllTables(db: Knex): Promise<void> {
  * @returns DbState snapshot
  */
 export async function captureDbState(db: Knex): Promise<DbState> {
-  return {
+  const state: DbState = {
     vaults: await db('vaults').select('*').orderBy('id'),
     milestones: await db('milestones').select('*').orderBy('id'),
     validations: await db('validations').select('*').orderBy('id'),
@@ -84,6 +107,17 @@ export async function captureDbState(db: Knex): Promise<DbState> {
     failedEvents: await db('failed_events').select('*').orderBy('id'),
     listenerState: await db('listener_state').select('*').orderBy('id')
   }
+  
+  // Capture RBAC-related tables if they exist
+  try {
+    state.users = await db('users').select('*').orderBy('id')
+    state.sessions = await db('sessions').select('*').orderBy('id')
+    state.verifiers = await db('verifiers').select('*').orderBy('user_id')
+  } catch (error) {
+    // Tables might not exist in all test environments
+  }
+  
+  return state
 }
 
 /**
@@ -238,4 +272,239 @@ export async function waitForCondition(
   }
   
   return false
+}
+
+/**
+ * RBAC-Specific Test Utilities
+ * These functions help create and manage test users, sessions, and verifiers
+ * for comprehensive RBAC testing.
+ * 
+ * **Validates: Requirement 12.5**
+ */
+
+/**
+ * Create a test user with specified role
+ * 
+ * @param db - Knex database instance
+ * @param userId - User ID
+ * @param role - User role (USER, VERIFIER, ADMIN)
+ * @param overrides - Optional field overrides
+ * @returns Created user object
+ */
+export async function createTestUser(
+  db: Knex,
+  userId: string,
+  role: UserRole,
+  overrides: Partial<{
+    email: string
+    status: string
+    deletedAt: Date | null
+  }> = {}
+): Promise<TestUser> {
+  const user = {
+    id: userId,
+    email: overrides.email || `${userId}@test.example.com`,
+    role: role,
+    status: overrides.status || 'ACTIVE',
+    deleted_at: overrides.deletedAt || null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  }
+
+  await db('users').insert(user)
+
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    createdAt: user.created_at,
+  }
+}
+
+/**
+ * Create test users for all three roles
+ * Convenience function to quickly set up a complete test environment
+ * 
+ * @param db - Knex database instance
+ * @returns Object with user, verifier, and admin test users
+ */
+export async function createAllRoleTestUsers(db: Knex): Promise<{
+  user: TestUser
+  verifier: TestUser
+  admin: TestUser
+}> {
+  const user = await createTestUser(db, 'test-user-id', UserRole.USER)
+  const verifier = await createTestUser(db, 'test-verifier-id', UserRole.VERIFIER)
+  const admin = await createTestUser(db, 'test-admin-id', UserRole.ADMIN)
+
+  return { user, verifier, admin }
+}
+
+/**
+ * Create a test session for a user
+ * 
+ * @param db - Knex database instance
+ * @param sessionId - Session ID (jti)
+ * @param userId - User ID
+ * @param overrides - Optional field overrides
+ */
+export async function createTestSession(
+  db: Knex,
+  sessionId: string,
+  userId: string,
+  overrides: Partial<{
+    expiresAt: Date
+    revokedAt: Date | null
+  }> = {}
+): Promise<void> {
+  await db('sessions').insert({
+    id: sessionId,
+    user_id: userId,
+    expires_at: overrides.expiresAt || new Date(Date.now() + 3600000), // 1 hour from now
+    revoked_at: overrides.revokedAt || null,
+    created_at: new Date(),
+  })
+}
+
+/**
+ * Revoke a test session
+ * 
+ * @param db - Knex database instance
+ * @param sessionId - Session ID to revoke
+ */
+export async function revokeTestSession(db: Knex, sessionId: string): Promise<void> {
+  await db('sessions')
+    .where({ id: sessionId })
+    .update({ revoked_at: new Date() })
+}
+
+/**
+ * Create a test verifier profile
+ * 
+ * @param db - Knex database instance
+ * @param userId - User ID (must have VERIFIER or ADMIN role)
+ * @param overrides - Optional field overrides
+ */
+export async function createTestVerifier(
+  db: Knex,
+  userId: string,
+  overrides: Partial<{
+    specialization: string
+    status: string
+    approvedAt: Date | null
+    suspendedAt: Date | null
+  }> = {}
+): Promise<void> {
+  await db('verifiers').insert({
+    user_id: userId,
+    specialization: overrides.specialization || 'milestone-verification',
+    status: overrides.status || 'ACTIVE',
+    approved_at: overrides.approvedAt || new Date(),
+    suspended_at: overrides.suspendedAt || null,
+    created_at: new Date(),
+    updated_at: new Date(),
+  })
+}
+
+/**
+ * Get a user by ID
+ * 
+ * @param db - Knex database instance
+ * @param userId - User ID
+ * @returns User object or null if not found
+ */
+export async function getTestUser(db: Knex, userId: string): Promise<TestUser | null> {
+  const user = await db('users').where({ id: userId }).first()
+  
+  if (!user) {
+    return null
+  }
+
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    createdAt: user.created_at,
+  }
+}
+
+/**
+ * Check if a session is valid (not revoked and not expired)
+ * 
+ * @param db - Knex database instance
+ * @param sessionId - Session ID
+ * @returns true if session is valid, false otherwise
+ */
+export async function isSessionValid(db: Knex, sessionId: string): Promise<boolean> {
+  const session = await db('sessions').where({ id: sessionId }).first()
+  
+  if (!session) {
+    return false
+  }
+
+  const now = new Date()
+  const isNotRevoked = !session.revoked_at
+  const isNotExpired = new Date(session.expires_at) > now
+
+  return isNotRevoked && isNotExpired
+}
+
+/**
+ * Delete a test user (soft delete)
+ * 
+ * @param db - Knex database instance
+ * @param userId - User ID
+ */
+export async function deleteTestUser(db: Knex, userId: string): Promise<void> {
+  await db('users')
+    .where({ id: userId })
+    .update({ deleted_at: new Date() })
+}
+
+/**
+ * Restore a soft-deleted test user
+ * 
+ * @param db - Knex database instance
+ * @param userId - User ID
+ */
+export async function restoreTestUser(db: Knex, userId: string): Promise<void> {
+  await db('users')
+    .where({ id: userId })
+    .update({ deleted_at: null })
+}
+
+/**
+ * Update a test user's role
+ * 
+ * @param db - Knex database instance
+ * @param userId - User ID
+ * @param newRole - New role to assign
+ */
+export async function updateTestUserRole(
+  db: Knex,
+  userId: string,
+  newRole: UserRole
+): Promise<void> {
+  await db('users')
+    .where({ id: userId })
+    .update({ role: newRole, updated_at: new Date() })
+}
+
+/**
+ * Update a test user's status
+ * 
+ * @param db - Knex database instance
+ * @param userId - User ID
+ * @param newStatus - New status to assign
+ */
+export async function updateTestUserStatus(
+  db: Knex,
+  userId: string,
+  newStatus: string
+): Promise<void> {
+  await db('users')
+    .where({ id: userId })
+    .update({ status: newStatus, updated_at: new Date() })
 }
