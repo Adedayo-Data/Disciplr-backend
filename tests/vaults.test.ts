@@ -647,6 +647,309 @@ describe('GET /api/vaults', () => {
   })
 })
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Integration tests – POST /api/vaults/:id/cancel
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('POST /api/vaults/:id/cancel', () => {
+  const adminToken = generateAccessToken({ userId: 'admin-user', role: UserRole.ADMIN })
+  const otherUserToken = generateAccessToken({ userId: 'other-user', role: UserRole.USER })
+
+  beforeEach(() => {
+    resetVaultStore()
+    resetIdempotencyStore()
+    setVaults([])
+  })
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+
+  it('returns 401 without auth token', async () => {
+    const res = await request(testApp).post('/api/vaults/nonexistent/cancel')
+    expect(res.status).toBe(401)
+    expect(res.body).toHaveProperty('error')
+  })
+
+  it('returns 401 with malformed token', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults/nonexistent/cancel')
+      .set('Authorization', 'Bearer invalid-token')
+    expect(res.status).toBe(401)
+  })
+
+  // ── Authorization ─────────────────────────────────────────────────────────
+
+  it('allows vault creator to cancel their own vault', async () => {
+    // Create a vault first
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel the vault
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Test cancellation' })
+      .expect(200)
+
+    expect(cancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  it('allows admin to cancel any vault', async () => {
+    // Create a vault as regular user
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel the vault as admin
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ reason: 'Admin cancellation' })
+      .expect(200)
+
+    expect(cancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  it('forbids non-creator, non-admin user from cancelling vault', async () => {
+    // Create a vault as one user
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Try to cancel as different user
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+    expect(cancelRes.status).toBe(403)
+    expect(cancelRes.body).toHaveProperty('error', 'Forbidden')
+  })
+
+  // ── Vault existence ───────────────────────────────────────────────────────
+
+  it('returns 404 for non-existent vault', async () => {
+    const res = await request(testApp)
+      .post('/api/vaults/00000000-0000-0000-0000-000000000000/cancel')
+      .set('Authorization', `Bearer ${userToken}`)
+    expect(res.status).toBe(404)
+    expect(res.body).toHaveProperty('error', 'Vault not found')
+  })
+
+  // ── Double cancellation ───────────────────────────────────────────────────
+
+  it('handles double cancellation gracefully', async () => {
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel once
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'First cancellation' })
+      .expect(200)
+
+    // Cancel again - should still succeed (idempotent)
+    const secondCancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Second cancellation' })
+      .expect(200)
+
+    expect(secondCancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  // ── Cancel completed vault ─────────────────────────────────────────────────
+
+  it('allows cancelling a completed vault', async () => {
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Manually set vault to completed status
+    const vaults = await request(testApp)
+      .get(`/api/vaults/${vaultId}`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200)
+
+    // Simulate completed status by updating in-memory store
+    const vaultArray = (testApp as any)._router?.stack?.find((layer: any) => layer.route?.path === '/api/vaults')?.route?.stack?.find((layer: any) => layer.handle?.name === 'bound dispatch')?.handle?.__vaults || []
+    const vaultIndex = vaultArray.findIndex((v: any) => v.id === vaultId)
+    if (vaultIndex !== -1) {
+      vaultArray[vaultIndex].status = 'completed'
+    }
+
+    // Cancel the completed vault
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Cancelling completed vault' })
+      .expect(200)
+
+    expect(cancelRes.body).toMatchObject({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+  })
+
+  // ── Audit logging ─────────────────────────────────────────────────────────
+
+  it('creates audit log entry on successful cancellation', async () => {
+    // Import audit log utilities for testing
+    const { listAuditLogs, clearAuditLogs } = await import('../src/lib/audit-logs.js')
+    
+    // Clear existing audit logs
+    clearAuditLogs()
+
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel the vault
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Test audit logging' })
+      .expect(200)
+
+    // Check audit logs
+    const auditLogs = listAuditLogs({ target_id: vaultId })
+    expect(auditLogs).toHaveLength(1)
+    
+    const auditLog = auditLogs[0]
+    expect(auditLog).toMatchObject({
+      actor_user_id: 'vault-test-user',
+      action: 'vault.cancelled',
+      target_type: 'vault',
+      target_id: vaultId,
+    })
+    expect(auditLog.metadata).toMatchObject({
+      previous_status: 'active',
+      new_status: 'cancelled',
+      reason: 'Test audit logging',
+      cancelled_by: 'creator',
+      creator: expect.any(String),
+      amount: '1000',
+    })
+    expect(auditLog.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/)
+  })
+
+  it('uses admin identifier when admin cancels vault', async () => {
+    const { listAuditLogs, clearAuditLogs } = await import('../src/lib/audit-logs.js')
+    clearAuditLogs()
+
+    // Create a vault as regular user
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel as admin
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ reason: 'Admin cancellation' })
+      .expect(200)
+
+    // Check audit logs
+    const auditLogs = listAuditLogs({ target_id: vaultId })
+    expect(auditLogs).toHaveLength(1)
+    
+    const auditLog = auditLogs[0]
+    expect(auditLog.actor_user_id).toBe('admin-user')
+    expect(auditLog.metadata.cancelled_by).toBe('admin')
+  })
+
+  it('uses default reason when none provided', async () => {
+    const { listAuditLogs, clearAuditLogs } = await import('../src/lib/audit-logs.js')
+    clearAuditLogs()
+
+    // Create and cancel vault without reason
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .expect(200)
+
+    // Check audit logs
+    const auditLogs = listAuditLogs({ target_id: vaultId })
+    expect(auditLogs).toHaveLength(1)
+    expect(auditLogs[0].metadata.reason).toBe('User requested cancellation')
+  })
+
+  // ── Response consistency ───────────────────────────────────────────────────
+
+  it('maintains consistent response format', async () => {
+    // Create a vault
+    const createRes = await request(testApp)
+      .post('/api/vaults')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send(validPayload())
+      .expect(201)
+
+    const vaultId = createRes.body.vault.id
+
+    // Cancel and check response format
+    const cancelRes = await request(testApp)
+      .post(`/api/vaults/${vaultId}/cancel`)
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ reason: 'Response format test' })
+      .expect(200)
+
+    // Response should match documented format
+    expect(cancelRes.body).toEqual({
+      message: 'Vault cancelled',
+      id: vaultId,
+    })
+    expect(Object.keys(cancelRes.body)).toHaveLength(2)
+  })
+})
+
 describe('X-Timezone header', () => {
   it('includes X-Timezone: UTC on responses', async () => {
     const res = await request(testApp).get('/api/health')

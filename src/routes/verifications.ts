@@ -9,7 +9,7 @@ import { createAuditLog } from '../lib/audit-logs.js'
 
 export const verificationsRouter = Router()
 
-verificationsRouter.post('/', authenticate, requireVerifier, async (req: Request, res: Response) => {
+verificationsRouter.post('/', authenticate, requireVerifier, requireActiveVerifier, async (req: Request, res: Response) => {
   const payload = req.user!
   const verifierUserId = payload.userId
   const { targetId, result, disputed } = req.body as {

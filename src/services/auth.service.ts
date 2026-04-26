@@ -1,9 +1,9 @@
 import { prisma } from '../lib/prisma.js'
-import { hashPassword, comparePassword, generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../lib/auth-utils.js'
+import { hashPassword, comparePassword, generateAccessToken, generateRefreshToken, verifyRefreshToken, hashToken } from '../lib/auth-utils.js'
 import { RegisterInput, LoginInput } from '../lib/validation.js'
 import { UserRole } from '../types/user.js'
 import { randomUUID } from 'node:crypto'
-import { recordSession } from './session.js'
+import { recordSession, revokeAllUserSessions } from './session.js'
 
 export class AuthService {
     static async register(input: RegisterInput) {
@@ -50,10 +50,11 @@ export class AuthService {
         const accessExpiresAt = new Date(Date.now() + 15 * 60 * 1000) // 15 minutes
         await recordSession(user.id, jti, accessExpiresAt)
 
-        // 2. Store refresh token
+        // 2. Store hashed refresh token — the raw value is only returned to the client
+        const tokenHash = hashToken(refreshTokenValue)
         await prisma.refreshToken.create({
             data: {
-                token: refreshTokenValue,
+                token: tokenHash,
                 userId: user.id,
                 expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
             },
@@ -69,8 +70,11 @@ export class AuthService {
     static async refresh(token: string) {
         try {
             const payload = verifyRefreshToken(token)
+
+            // Look up by hash — we never store the raw token
+            const tokenHash = hashToken(token)
             const storedToken = await prisma.refreshToken.findUnique({
-                where: { token },
+                where: { token: tokenHash },
                 include: { user: true },
             })
 
@@ -78,7 +82,7 @@ export class AuthService {
                 throw new Error('Invalid or expired refresh token')
             }
 
-            // Revoke old token and issue new ones (Rotation strategy)
+            // Revoke old token BEFORE issuing new ones (no dual-valid window)
             await prisma.refreshToken.update({
                 where: { id: storedToken.id },
                 data: { revokedAt: new Date() },
@@ -92,10 +96,11 @@ export class AuthService {
             const accessExpiresAt = new Date(Date.now() + 15 * 60 * 1000)
             await recordSession(storedToken.user.id, jti, accessExpiresAt)
 
-            // 2. Store new refresh token
+            // 2. Store hashed new refresh token
+            const newTokenHash = hashToken(newRefreshTokenValue)
             await prisma.refreshToken.create({
                 data: {
-                    token: newRefreshTokenValue,
+                    token: newTokenHash,
                     userId: storedToken.user.id,
                     expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
                 },
@@ -111,9 +116,26 @@ export class AuthService {
     }
 
     static async logout(token: string) {
+        const tokenHash = hashToken(token)
         await prisma.refreshToken.updateMany({
-            where: { token },
+            where: { token: tokenHash },
             data: { revokedAt: new Date() },
         })
     }
+
+    /**
+     * Revoke ALL refresh tokens AND sessions for a user.
+     * Used by the /logout-all endpoint.
+     */
+    static async logoutAll(userId: string) {
+        // 1. Revoke all refresh tokens for this user
+        await prisma.refreshToken.updateMany({
+            where: { userId, revokedAt: null },
+            data: { revokedAt: new Date() },
+        })
+
+        // 2. Revoke all access token sessions
+        await revokeAllUserSessions(userId)
+    }
 }
+

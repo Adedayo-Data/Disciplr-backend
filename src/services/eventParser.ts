@@ -8,6 +8,78 @@ import {
 } from '../types/horizonSync.js'
 
 /**
+ * Schema validation result
+ */
+interface ValidationResult {
+  isValid: boolean
+  error?: string
+  sanitizedPayload?: Record<string, unknown>
+}
+
+/**
+ * Safe object creation that prevents prototype pollution
+ */
+function createSafeObject<T extends Record<string, unknown>>(payload: T): T {
+  const obj = Object.create(null) as T
+  for (const key in payload) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      obj[key] = payload[key]
+    }
+  }
+  return obj
+}
+
+/**
+ * Validates object against allowed field names (strict schema validation)
+ */
+function validateAllowedFields(
+  payload: Record<string, unknown>,
+  allowedFields: string[]
+): ValidationResult {
+  const payloadKeys = Object.keys(payload)
+  const unknownFields = payloadKeys.filter(key => !allowedFields.includes(key))
+  
+  if (unknownFields.length > 0) {
+    return {
+      isValid: false,
+      error: `Unknown fields not allowed: ${unknownFields.join(', ')}`
+    }
+  }
+  
+  return { isValid: true }
+}
+
+/**
+ * Redacts sensitive information from error logs
+ */
+function redactSensitiveInfo(data: Record<string, unknown>): Record<string, unknown> {
+  const redacted = { ...data }
+  const sensitiveFields = ['privateKey', 'secret', 'password', 'token', 'key']
+  
+  for (const key in redacted) {
+    if (sensitiveFields.some(sensitive => key.toLowerCase().includes(sensitive))) {
+      redacted[key] = '[REDACTED]'
+    }
+  }
+  
+  return redacted
+}
+
+/**
+ * Validates Stellar address format
+ */
+function validateStellarAddress(address: string): boolean {
+  return /^[G][A-Z0-9]{55}$/.test(address)
+}
+
+/**
+ * Validates decimal amount format
+ */
+function validateDecimalAmount(amount: string): boolean {
+  return /^\d+(\.\d{1,7})?$/.test(amount) && parseFloat(amount) > 0
+}
+
+/**
  * Result of parsing a Horizon event
  */
 export type ParseResult =
@@ -42,15 +114,31 @@ export interface HorizonEvent {
 /**
  * Validates vault_created event payload
  */
-function validateVaultCreatedPayload(payload: VaultEventPayload): string | null {
+function validateVaultCreatedPayload(payload: VaultEventPayload): ValidationResult {
+  const allowedFields = [
+    'vaultId', 'creator', 'amount', 'startTimestamp', 'endTimestamp', 
+    'successDestination', 'failureDestination', 'status'
+  ]
+  
+  // Check for unknown fields
+  const fieldValidation = validateAllowedFields(payload as unknown as Record<string, unknown>, allowedFields)
+  if (!fieldValidation.isValid) {
+    return fieldValidation
+  }
+  
+  // Validate required fields
   if (!payload.vaultId || typeof payload.vaultId !== 'string') {
-    return 'Missing or invalid vaultId field'
+    return { isValid: false, error: 'Missing or invalid vaultId field' }
   }
   if (!payload.creator || typeof payload.creator !== 'string') {
-    return 'Missing or invalid creator field'
+    return { isValid: false, error: 'Missing or invalid creator field' }
+  }
+  
+  if (!validateStellarAddress(payload.creator)) {
+    return { isValid: false, error: 'Invalid creator address format' }
   }
   if (!payload.amount || typeof payload.amount !== 'string') {
-    return 'Missing or invalid amount field'
+    return { isValid: false, error: 'Missing or invalid amount field' }
   }
   if (isNaN(parseFloat(payload.amount))) {
     return 'Amount must be a valid decimal number'
@@ -62,10 +150,14 @@ function validateVaultCreatedPayload(payload: VaultEventPayload): string | null 
     return 'Missing or invalid endTimestamp field'
   }
   if (!payload.successDestination || typeof payload.successDestination !== 'string') {
-    return 'Missing or invalid successDestination field'
+    return { isValid: false, error: 'Missing or invalid successDestination field' }
+  }
+  
+  if (!validateStellarAddress(payload.successDestination)) {
+    return { isValid: false, error: 'Invalid successDestination address format' }
   }
   if (!payload.failureDestination || typeof payload.failureDestination !== 'string') {
-    return 'Missing or invalid failureDestination field'
+    return { isValid: false, error: 'Missing or invalid failureDestination field' }
   }
   return null
 }
@@ -73,9 +165,17 @@ function validateVaultCreatedPayload(payload: VaultEventPayload): string | null 
 /**
  * Validates vault status event payload
  */
-function validateVaultStatusPayload(payload: VaultEventPayload): string | null {
+function validateVaultStatusPayload(payload: VaultEventPayload): ValidationResult {
+  const allowedFields = ['vaultId', 'status']
+  
+  // Check for unknown fields
+  const fieldValidation = validateAllowedFields(payload as unknown as Record<string, unknown>, allowedFields)
+  if (!fieldValidation.isValid) {
+    return fieldValidation
+  }
+  
   if (!payload.vaultId || typeof payload.vaultId !== 'string') {
-    return 'Missing or invalid vaultId field'
+    return { isValid: false, error: 'Missing or invalid vaultId field' }
   }
   const validStatuses = ['active', 'completed', 'failed', 'cancelled']
   if (!payload.status || !validStatuses.includes(payload.status)) {
@@ -136,18 +236,38 @@ function parseVaultPayload(
 /**
  * Validates milestone_created event payload
  */
-function validateMilestonePayload(payload: MilestoneEventPayload): string | null {
+function validateMilestonePayload(payload: MilestoneEventPayload): ValidationResult {
+  const allowedFields = ['milestoneId', 'vaultId', 'title', 'description', 'targetAmount', 'deadline']
+  
+  // Check for unknown fields
+  const fieldValidation = validateAllowedFields(payload as unknown as Record<string, unknown>, allowedFields)
+  if (!fieldValidation.isValid) {
+    return fieldValidation
+  }
+  
   if (!payload.milestoneId || typeof payload.milestoneId !== 'string') {
-    return 'Missing or invalid milestoneId field'
+    return { isValid: false, error: 'Missing or invalid milestoneId field' }
   }
   if (!payload.vaultId || typeof payload.vaultId !== 'string') {
-    return 'Missing or invalid vaultId field'
+    return { isValid: false, error: 'Missing or invalid vaultId field' }
   }
   if (!payload.title || typeof payload.title !== 'string') {
-    return 'Missing or invalid title field'
+    return { isValid: false, error: 'Missing or invalid title field' }
+  }
+  
+  if (payload.title.length > 255) {
+    return { isValid: false, error: 'Title must be 255 characters or less' }
+  }
+  
+  if (payload.description !== undefined && typeof payload.description !== 'string') {
+    return { isValid: false, error: 'Description must be a string' }
+  }
+  
+  if (payload.description && payload.description.length > 1000) {
+    return { isValid: false, error: 'Description must be 1000 characters or less' }
   }
   if (!payload.targetAmount || typeof payload.targetAmount !== 'string') {
-    return 'Missing or invalid targetAmount field'
+    return { isValid: false, error: 'Missing or invalid targetAmount field' }
   }
   if (isNaN(parseFloat(payload.targetAmount))) {
     return 'targetAmount must be a valid decimal number'
@@ -165,6 +285,9 @@ function parseMilestonePayload(xdrData: string): MilestoneEventPayload | null {
   try {
     const scVal = xdr.ScVal.fromXDR(xdrData, 'base64')
     const nativeVal = scValToNative(scVal)
+    
+    // Try to decode payload as JSON first (fallback for testing)
+    const decoded = decodePayloadRecord(xdrData)
     
     const payload: MilestoneEventPayload = {
       milestoneId: nativeVal.milestone_id || nativeVal.id || `milestone_${Date.now()}`,
@@ -190,18 +313,30 @@ function parseMilestonePayload(xdrData: string): MilestoneEventPayload | null {
 /**
  * Validates milestone_validated event payload
  */
-function validateValidationPayload(payload: ValidationEventPayload): string | null {
+function validateValidationPayload(payload: ValidationEventPayload): ValidationResult {
+  const allowedFields = ['validationId', 'milestoneId', 'validatorAddress', 'validationResult', 'evidenceHash', 'validatedAt']
+  
+  // Check for unknown fields
+  const fieldValidation = validateAllowedFields(payload as unknown as Record<string, unknown>, allowedFields)
+  if (!fieldValidation.isValid) {
+    return fieldValidation
+  }
+  
   if (!payload.validationId || typeof payload.validationId !== 'string') {
-    return 'Missing or invalid validationId field'
+    return { isValid: false, error: 'Missing or invalid validationId field' }
   }
   if (!payload.milestoneId || typeof payload.milestoneId !== 'string') {
-    return 'Missing or invalid milestoneId field'
+    return { isValid: false, error: 'Missing or invalid milestoneId field' }
   }
   if (!payload.validatorAddress || typeof payload.validatorAddress !== 'string') {
-    return 'Missing or invalid validatorAddress field'
+    return { isValid: false, error: 'Missing or invalid validatorAddress field' }
+  }
+  
+  if (!validateStellarAddress(payload.validatorAddress)) {
+    return { isValid: false, error: 'Invalid validatorAddress format' }
   }
   if (!payload.validationResult || typeof payload.validationResult !== 'string') {
-    return 'Missing or invalid validationResult field'
+    return { isValid: false, error: 'Missing or invalid validationResult field' }
   }
   const validResults = ['approved', 'rejected', 'pending_review']
   if (!validResults.includes(payload.validationResult)) {
@@ -220,6 +355,9 @@ function parseValidationPayload(xdrData: string): ValidationEventPayload | null 
   try {
     const scVal = xdr.ScVal.fromXDR(xdrData, 'base64')
     const nativeVal = scValToNative(scVal)
+    
+    // Try to decode payload as JSON first (fallback for testing)
+    const decoded = decodePayloadRecord(xdrData)
     
     const payload: ValidationEventPayload = {
       validationId: nativeVal.validation_id || nativeVal.id || `val_${Date.now()}`,

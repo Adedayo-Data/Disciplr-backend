@@ -1,215 +1,51 @@
-import { describe, it, beforeAll, expect } from '@jest/globals'
-import fc from 'fast-check'
+import { describe, it, beforeAll, beforeEach } from '@jest/globals'
+import request from 'supertest'
+import express from 'express'
 import { UserRole } from '../types/user.js'
-import {
-  arbitraryUserRole,
-  arbitraryValidJWTPayload,
-  arbitraryMaliciousHeaders,
-  arbitraryAdminEndpoint,
-  arbitraryAuthenticationState,
-  arbitrarySecurityBypassAttempt,
-  arbitraryEndpointAccessScenario,
-  arbitraryRoleHierarchyScenario,
-  arbitraryTokenManipulationScenario
-} from './fixtures/rbacArbitraries.js'
+import { jest } from '@jest/globals'
 
-/**
- * RBAC Unit Tests
- *
- * These tests verify core RBAC logic and are designed to work with mocked/isolated middleware.
- * Integration tests for actual endpoints are in src/tests/admin.rbac.test.ts.
- */
+const mockGetVerifierProfile = jest.fn<any>()
 
-describe('RBAC: Role Definitions and Hierarchy', () => {
-  it('defines USER role', () => {
-    expect(UserRole.USER).toBe('USER')
-  })
+// Mock database connection
+const mockDb = {
+  insert: jest.fn<any>().mockReturnThis(),
+  returning: jest.fn<any>().mockReturnThis(),
+  where: jest.fn<any>().mockReturnThis(),
+  whereNull: jest.fn<any>().mockReturnThis(),
+  andWhere: jest.fn<any>().mockReturnThis(),
+  update: jest.fn<any>().mockReturnThis(),
+  first: jest.fn<any>().mockResolvedValue({ id: 'mock-session-id' }),
+}
 
-  it('defines VERIFIER role', () => {
-    expect(UserRole.VERIFIER).toBe('VERIFIER')
-  })
+jest.unstable_mockModule('../db/index.js', () => ({
+  db: jest.fn<any>(() => mockDb),
+  default: jest.fn<any>(() => mockDb),
+}))
 
-  it('defines ADMIN role', () => {
-    expect(UserRole.ADMIN).toBe('ADMIN')
-  })
+jest.unstable_mockModule('../services/verifiers.js', () => ({
+  getVerifierProfile: mockGetVerifierProfile,
+}))
 
-  it('has exactly three roles', () => {
-    const roles = Object.values(UserRole)
-    expect(roles).toHaveLength(3)
-    expect(roles).toContain('USER')
-    expect(roles).toContain('VERIFIER')
-    expect(roles).toContain('ADMIN')
-  })
-})
+let app: express.Express
+let tokenHelpers: Record<string, () => Promise<string>>
 
-describe('RBAC: Role Hierarchy Logic', () => {
-  /**
-   * Define role hierarchies: which roles can access which resource levels
-   * This reflects the business logic: VERIFIER >= USER, ADMIN >= VERIFIER >= USER
-   */
+beforeAll(async () => {
+    // Dynamic import to allow mocks to be applied before module evaluation
+    const authModule = await import('../middleware/auth.js')
+    const rbacModule = await import('../middleware/rbac.js')
 
-  const roleHierarchy = {
-    user: [UserRole.USER, UserRole.VERIFIER, UserRole.ADMIN],
-    verifier: [UserRole.VERIFIER, UserRole.ADMIN],
-    admin: [UserRole.ADMIN],
-  }
+    app = express()
+    app.use(express.json())
 
-  it('USER level accessible by USER, VERIFIER, and ADMIN', () => {
-    expect(roleHierarchy.user).toContain(UserRole.USER)
-    expect(roleHierarchy.user).toContain(UserRole.VERIFIER)
-    expect(roleHierarchy.user).toContain(UserRole.ADMIN)
-  })
+    app.get('/user-route', authModule.authenticate, rbacModule.requireUser, (_req, res) => res.json({ ok: true }))
+    app.post('/verify-route', authModule.authenticate, rbacModule.requireVerifier, (_req, res) => res.json({ ok: true }))
+    app.post('/active-verify-route', authModule.authenticate, rbacModule.requireVerifier, rbacModule.requireActiveVerifier, (req, res) => res.json({ verifier: req.verifier }))
+    app.delete('/admin-route', authModule.authenticate, rbacModule.requireAdmin, (_req, res) => res.json({ ok: true }))
 
-  it('VERIFIER level accessible by VERIFIER and ADMIN only', () => {
-    expect(roleHierarchy.verifier).toContain(UserRole.VERIFIER)
-    expect(roleHierarchy.verifier).toContain(UserRole.ADMIN)
-    expect(roleHierarchy.verifier).not.toContain(UserRole.USER)
-  })
-
-  it('ADMIN level accessible by ADMIN only', () => {
-    expect(roleHierarchy.admin).toContain(UserRole.ADMIN)
-    expect(roleHierarchy.admin).not.toContain(UserRole.USER)
-    expect(roleHierarchy.admin).not.toContain(UserRole.VERIFIER)
-  })
-})
-
-describe('RBAC: Authorization Logic', () => {
-  /**
-   * Verify authorization decision logic: given a role and a required role list,
-   * determine if access should be granted.
-   */
-
-  const authorize = (userRole: UserRole, allowedRoles: UserRole[]): boolean => {
-    return allowedRoles.includes(userRole)
-  }
-
-  it('grants access when user role is in allowed list', () => {
-    const result = authorize(UserRole.ADMIN, [UserRole.ADMIN])
-    expect(result).toBe(true)
-  })
-
-  it('denies access when user role is not in allowed list', () => {
-    const result = authorize(UserRole.USER, [UserRole.ADMIN])
-    expect(result).toBe(false)
-  })
-
-  it('grants access to ADMIN for verifier-level routes', () => {
-    const result = authorize(UserRole.ADMIN, [UserRole.VERIFIER, UserRole.ADMIN])
-    expect(result).toBe(true)
-  })
-
-  it('denies access to USER for verifier-level routes', () => {
-    const result = authorize(UserRole.USER, [UserRole.VERIFIER, UserRole.ADMIN])
-    expect(result).toBe(false)
-  })
-
-  it('grants access to VERIFIER for user-level routes', () => {
-    const result = authorize(UserRole.VERIFIER, [UserRole.USER, UserRole.VERIFIER, UserRole.ADMIN])
-    expect(result).toBe(true)
-  })
-})
-
-describe('RBAC: Security Invariants', () => {
-  /**
-   * Test core security properties that must always hold
-   */
-
-  it('role cannot be undefined', () => {
-    const roles = Object.values(UserRole)
-    roles.forEach(role => {
-      expect(role).toBeDefined()
-      expect(role).not.toBe(undefined)
-      expect(role).not.toBeNull()
-    })
-  })
-
-  it('role values are strings', () => {
-    const roles = Object.values(UserRole)
-    roles.forEach(role => {
-      expect(typeof role).toBe('string')
-    })
-  })
-
-  it('role values are non-empty', () => {
-    const roles = Object.values(UserRole)
-    roles.forEach(role => {
-      expect(role.length).toBeGreaterThan(0)
-    })
-  })
-
-  it('roles are case-sensitive', () => {
-    // Roles must match exactly, not case-insensitively
-    const admin = UserRole.ADMIN
-    expect(admin).toEqual('ADMIN')
-    expect(admin).not.toEqual('admin')
-    expect(admin).not.toEqual('Admin')
-  })
-})
-
-
-describe('RBAC: Header Isolation and Security Bypass Prevention', () => {
-  /**
-   * Test that RBAC system reads role exclusively from JWT tokens
-   * and never from request headers, preventing privilege escalation attacks.
-   * 
-   * **Validates: Requirements 1.1, 1.2, 1.4, 1.5**
-   */
-
-  it('ignores x-user-role header for role determination', () => {
-    // Simulate middleware behavior: role comes from JWT, not headers
-    const jwtRole = UserRole.USER
-    const headerRole = 'ADMIN' // Malicious header
-    
-    // Authorization decision should be based on JWT role only
-    const allowedRoles = [UserRole.ADMIN]
-    const isAuthorized = allowedRoles.includes(jwtRole)
-    
-    expect(isAuthorized).toBe(false) // USER should be denied
-    expect(allowedRoles.includes(headerRole as UserRole)).toBe(true) // Header would grant access
-    // But the system MUST use jwtRole, not headerRole
-  })
-
-  it('ignores x-requested-role header for role determination', () => {
-    const jwtRole = UserRole.VERIFIER
-    const headerRole = 'ADMIN'
-    
-    const allowedRoles = [UserRole.ADMIN]
-    const isAuthorized = allowedRoles.includes(jwtRole)
-    
-    expect(isAuthorized).toBe(false) // VERIFIER should be denied
-  })
-
-  it('ignores role header in any case variation', () => {
-    const jwtRole = UserRole.USER
-    const headerVariations = ['ADMIN', 'admin', 'Admin', 'aDmIn']
-    
-    const allowedRoles = [UserRole.ADMIN]
-    const isAuthorized = allowedRoles.includes(jwtRole)
-    
-    expect(isAuthorized).toBe(false)
-    // None of the header variations should affect the decision
-    headerVariations.forEach(headerRole => {
-      expect(jwtRole).not.toBe(headerRole)
-    })
-  })
-
-  it('ignores x-auth-role header for role determination', () => {
-    const jwtRole = UserRole.USER
-    const headerRole = 'ADMIN'
-    
-    const allowedRoles = [UserRole.ADMIN]
-    const isAuthorized = allowedRoles.includes(jwtRole)
-    
-    expect(isAuthorized).toBe(false)
-  })
-
-  it('ignores multiple role headers simultaneously', () => {
-    const jwtRole = UserRole.USER
-    const maliciousHeaders = {
-      'x-user-role': 'ADMIN',
-      'x-requested-role': 'ADMIN',
-      'role': 'ADMIN',
-      'x-auth-role': 'ADMIN',
+    tokenHelpers = {
+        user: async () => `Bearer ${await authModule.signToken({ userId: '1', role: UserRole.USER })}`,
+        verifier: async () => `Bearer ${await authModule.signToken({ userId: '1', role: UserRole.VERIFIER })}`,
+        admin: async () => `Bearer ${await authModule.signToken({ userId: '1', role: UserRole.ADMIN })}`,
     }
     
     const allowedRoles = [UserRole.ADMIN]
@@ -263,87 +99,25 @@ describe('RBAC: Header Isolation and Security Bypass Prevention', () => {
   })
 })
 
-describe('RBAC: Authentication Precedence Invariant', () => {
-  /**
-   * Test that authentication checks always occur before authorization checks
-   * ensuring proper security layering.
-   * 
-   * **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5**
-   */
+beforeEach(() => {
+     mockGetVerifierProfile.mockReset()
+})
 
-  const AUTH_ERROR = 401
-  const AUTHZ_ERROR = 403
+describe('authenticate', () => {
+     it('rejects request with no token', async () => {
+          const res = await request(app).get('/user-route')
+          expect(res.status).toBe(401)
+     })
 
-  it('returns 401 for missing authentication, never 403', () => {
-    const isAuthenticated = false
-    const hasRequiredRole = false // Doesn't matter if not authenticated
-    
-    const statusCode = !isAuthenticated ? AUTH_ERROR : (hasRequiredRole ? 200 : AUTHZ_ERROR)
-    
-    expect(statusCode).toBe(401)
-    expect(statusCode).not.toBe(403)
-  })
+     it('rejects an invalid token', async () => {
+          const res = await request(app).get('/user-route').set('Authorization', 'Bearer invalid-token')
+          expect(res.status).toBe(401)
+     })
 
-  it('returns 401 for malformed token, never 403', () => {
-    const tokenValid = false
-    const tokenMalformed = true
-    const hasRequiredRole = false
-    
-    const statusCode = tokenMalformed ? AUTH_ERROR : (hasRequiredRole ? 200 : AUTHZ_ERROR)
-    
-    expect(statusCode).toBe(401)
-    expect(statusCode).not.toBe(403)
-  })
-
-  it('returns 401 for invalid token signature, never 403', () => {
-    const tokenSignatureValid = false
-    const hasRequiredRole = false
-    
-    const statusCode = !tokenSignatureValid ? AUTH_ERROR : (hasRequiredRole ? 200 : AUTHZ_ERROR)
-    
-    expect(statusCode).toBe(401)
-    expect(statusCode).not.toBe(403)
-  })
-
-  it('returns 401 for expired token, never 403', () => {
-    const tokenExpired = true
-    const hasRequiredRole = false
-    
-    const statusCode = tokenExpired ? AUTH_ERROR : (hasRequiredRole ? 200 : AUTHZ_ERROR)
-    
-    expect(statusCode).toBe(401)
-    expect(statusCode).not.toBe(403)
-  })
-
-  it('returns 403 only after successful authentication', () => {
-    const isAuthenticated = true
-    const tokenValid = true
-    const hasRequiredRole = false
-    
-    const statusCode = !isAuthenticated || !tokenValid ? AUTH_ERROR : (hasRequiredRole ? 200 : AUTHZ_ERROR)
-    
-    expect(statusCode).toBe(403)
-    expect(statusCode).not.toBe(401)
-  })
-
-  it('authentication failure takes precedence over authorization failure', () => {
-    const authenticationFailed = true
-    const authorizationWouldFail = true
-    
-    // Even if authorization would fail, authentication failure is reported first
-    const statusCode = authenticationFailed ? AUTH_ERROR : (authorizationWouldFail ? AUTHZ_ERROR : 200)
-    
-    expect(statusCode).toBe(401)
-  })
-
-  it('validates authentication state before checking role', () => {
-    // Proper security layering: authenticate → authorize
-    const securityLayers = ['authentication', 'authorization']
-    
-    expect(securityLayers[0]).toBe('authentication')
-    expect(securityLayers[1]).toBe('authorization')
-    expect(securityLayers.indexOf('authentication')).toBeLessThan(securityLayers.indexOf('authorization'))
-  })
+     it('accepts a valid token', async () => {
+          const res = await request(app).get('/user-route').set('Authorization', await tokenHelpers.user())
+          expect(res.status).toBe(200)
+     })
 })
 
 describe('RBAC: Error Response Consistency', () => {
@@ -549,300 +323,46 @@ describe('RBAC: Security Bypass Prevention', () => {
   })
 })
 
-/**
- * PROPERTY-BASED TESTS
- * 
- * These tests use property-based testing to validate universal security properties
- * across all valid inputs, providing comprehensive coverage beyond unit tests.
- */
+describe('requireActiveVerifier', () => {
+     it('denies verifier token without registry row', async () => {
+          mockGetVerifierProfile.mockResolvedValue(undefined)
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(403)
+     })
 
-describe('RBAC: Property-Based Security Tests', () => {
-  /**
-   * Property 1: Header Isolation and Security Bypass Prevention
-   * 
-   * For any valid JWT token with role R and any combination of request headers 
-   * containing role information, the RBAC system SHALL make authorization decisions 
-   * based exclusively on the JWT role R and SHALL ignore all header-based role information.
-   * 
-   * **Validates: Requirements 1.1, 1.2, 1.3, 1.4, 1.5, 10.1, 10.2, 10.3, 10.4, 10.5**
-   */
-  it('Property 1: Header isolation prevents privilege escalation', () => {
-    fc.assert(fc.property(
-      arbitraryValidJWTPayload(),
-      arbitraryMaliciousHeaders(),
-      arbitraryAdminEndpoint(),
-      (jwtPayload, maliciousHeaders, endpoint) => {
-        // Authorization decision must be based only on JWT role
-        const isAuthorized = endpoint.allowedRoles.includes(jwtPayload.role)
-        
-        // Headers should never affect the authorization decision
-        const headerRoles = Object.values(maliciousHeaders).filter(value => 
-          ['ADMIN', 'VERIFIER', 'USER', 'SUPERUSER', 'ROOT'].includes(value)
-        )
-        
-        // Even if headers contain privileged roles, JWT role determines access
-        const hasPrivilegedHeaders = headerRoles.some(role => 
-          ['ADMIN', 'SUPERUSER', 'ROOT'].includes(role)
-        )
-        
-        // The authorization decision should be independent of headers
-        if (hasPrivilegedHeaders && !isAuthorized) {
-          // Headers claim privilege but JWT doesn't have it - should be denied
-          expect(isAuthorized).toBe(false)
-        }
-        
-        return true // Property holds: headers don't affect JWT-based decisions
-      }
-    ), { numRuns: 100 })
-  })
+     it.each(['pending', 'suspended', 'deactivated'])('denies %s registry status', async (status) => {
+          mockGetVerifierProfile.mockResolvedValue({ userId: '1', status })
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(403)
+     })
 
-  /**
-   * Property 2: Admin Endpoint Access Control
-   * 
-   * For any admin endpoint under /api/admin/* and any JWT token with role R, 
-   * the RBAC system SHALL allow access if and only if R equals ADMIN.
-   * 
-   * **Validates: Requirements 2.1, 2.2, 2.3**
-   */
-  it('Property 2: Admin endpoints enforce admin-only access', () => {
-    fc.assert(fc.property(
-      arbitraryAdminEndpoint(),
-      arbitraryUserRole(),
-      (endpoint, userRole) => {
-        const isAuthorized = endpoint.allowedRoles.includes(userRole)
-        const isAdminEndpoint = endpoint.path.startsWith('/api/admin/')
-        
-        if (isAdminEndpoint) {
-          // Admin endpoints should only allow ADMIN role
-          if (userRole === UserRole.ADMIN) {
-            expect(isAuthorized).toBe(true)
-          } else {
-            expect(isAuthorized).toBe(false)
-          }
-        }
-        
-        return true
-      }
-    ), { numRuns: 100 })
-  })
+     it('allows approved registry status and attaches verifier profile', async () => {
+          mockGetVerifierProfile.mockResolvedValue({ userId: '1', status: 'approved', metadata: { specialty: 'docs' } })
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(200)
+          expect(res.body.verifier.status).toBe('approved')
+     })
 
-  /**
-   * Property 5: Authentication Precedence Invariant
-   * 
-   * For any protected endpoint and any request with authentication state S, 
-   * the RBAC system SHALL return 401 Unauthorized for all invalid authentication 
-   * states and SHALL only return 403 Forbidden after successful authentication.
-   * 
-   * **Validates: Requirements 5.1, 5.2, 5.3, 5.4, 5.5**
-   */
-  it('Property 5: Authentication always precedes authorization', () => {
-    fc.assert(fc.property(
-      arbitraryAuthenticationState(),
-      arbitraryUserRole(),
-      (authState, userRole) => {
-        const isAuthenticated = authState.hasToken && 
-                               authState.tokenValid && 
-                               !authState.tokenExpired && 
-                               !authState.tokenMalformed && 
-                               authState.signatureValid
-        
-        const hasRequiredRole = userRole === UserRole.ADMIN // Assume admin-only endpoint
-        
-        let expectedStatus: number
-        if (!isAuthenticated) {
-          expectedStatus = 401 // Authentication failure always comes first
-        } else if (!hasRequiredRole) {
-          expectedStatus = 403 // Authorization failure only after successful auth
-        } else {
-          expectedStatus = 200 // Success
-        }
-        
-        // Authentication failures must never return 403
-        if (!isAuthenticated) {
-          expect(expectedStatus).toBe(401)
-          expect(expectedStatus).not.toBe(403)
-        }
-        
-        // Authorization failures only occur after successful authentication
-        if (expectedStatus === 403) {
-          expect(isAuthenticated).toBe(true)
-        }
-        
-        return true
-      }
-    ), { numRuns: 100 })
-  })
+     it('returns 500 when verifier registry lookup fails', async () => {
+          mockGetVerifierProfile.mockRejectedValue(new Error('db down'))
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(500)
+     })
+})
 
-  /**
-   * Property 6: Error Envelope Consistency
-   * 
-   * For any RBAC-related error condition, the RBAC system SHALL return a consistent 
-   * JSON error envelope with proper status codes and error messages.
-   * 
-   * **Validates: Requirements 6.1, 6.2, 6.3, 6.4, 6.5**
-   */
-  it('Property 6: Error responses maintain consistent format', () => {
-    fc.assert(fc.property(
-      fc.oneof(
-        // 401 error messages
-        fc.record({
-          statusCode: fc.constant(401),
-          errorMessage: fc.constantFrom('Unauthorized', 'Invalid token', 'Token expired', 'Missing authorization'),
-          optionalMessage: fc.option(fc.string({ minLength: 1, maxLength: 100 }))
-        }),
-        // 403 error messages
-        fc.record({
-          statusCode: fc.constant(403),
-          errorMessage: fc.constantFrom('Forbidden', 'Requires role: ADMIN', 'Insufficient permissions'),
-          optionalMessage: fc.option(fc.string({ minLength: 1, maxLength: 100 }))
-        })
-      ),
-      ({ statusCode, errorMessage, optionalMessage }) => {
-        const errorEnvelope = {
-          error: errorMessage,
-          ...(optionalMessage && { message: optionalMessage })
-        }
-        
-        // Validate error envelope structure
-        expect(errorEnvelope).toHaveProperty('error')
-        expect(typeof errorEnvelope.error).toBe('string')
-        expect(errorEnvelope.error.length).toBeGreaterThan(0)
-        
-        // Validate status code consistency
-        if (statusCode === 401) {
-          expect(errorMessage.toLowerCase()).toMatch(/unauthorized|invalid|expired|missing/)
-        } else if (statusCode === 403) {
-          expect(errorMessage.toLowerCase()).toMatch(/forbidden|requires|insufficient/)
-        }
-        
-        return true
-      }
-    ), { numRuns: 100 })
-  })
+describe('requireAdmin', () => {
+     it('forbids user', async () => {
+          const res = await request(app).delete('/admin-route').set('Authorization', await tokenHelpers.user())
+          expect(res.status).toBe(403)
+     })
 
-  /**
-   * Comprehensive Security Bypass Prevention Property Test
-   * 
-   * Tests various security bypass techniques with property-based approach
-   */
-  it('Property: All security bypass attempts fail appropriately', () => {
-    fc.assert(fc.property(
-      arbitrarySecurityBypassAttempt(),
-      (bypassAttempt) => {
-        // All bypass attempts should result in denial or unauthorized
-        expect(['denied', 'unauthorized']).toContain(bypassAttempt.expectedOutcome)
-        
-        // Header spoofing should never succeed
-        if (bypassAttempt.method === 'header-spoofing') {
-          expect(bypassAttempt.expectedOutcome).toBe('denied')
-        }
-        
-        // Token manipulation should result in authentication failure
-        if (bypassAttempt.method === 'token-manipulation') {
-          expect(bypassAttempt.expectedOutcome).toBe('unauthorized')
-        }
-        
-        return true
-      }
-    ), { numRuns: 100 })
-  })
+     it('forbids verifier', async () => {
+          const res = await request(app).delete('/admin-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(403)
+     })
 
-  /**
-   * Role Hierarchy Property Test
-   * 
-   * Validates that role hierarchy is consistently enforced
-   */
-  it('Property: Role hierarchy is consistently enforced', () => {
-    fc.assert(fc.property(
-      arbitraryRoleHierarchyScenario(),
-      (scenario) => {
-        const { requiredRoles, userRole, shouldHaveAccess } = scenario
-        
-        // Calculate actual access based on role hierarchy
-        let actualAccess = requiredRoles.includes(userRole)
-        
-        // Role hierarchy: USER < VERIFIER < ADMIN
-        // Higher roles can access lower-level resources
-        if (!actualAccess) {
-          if (userRole === UserRole.ADMIN && 
-              (requiredRoles.includes(UserRole.VERIFIER) || requiredRoles.includes(UserRole.USER))) {
-            actualAccess = true
-          } else if (userRole === UserRole.VERIFIER && requiredRoles.includes(UserRole.USER)) {
-            actualAccess = true
-          }
-        }
-        
-        // The calculated access should match the expected access
-        expect(actualAccess).toBe(shouldHaveAccess)
-        
-        return true
-      }
-    ), { numRuns: 100 })
-  })
-
-  /**
-   * Token Manipulation Resistance Property Test
-   * 
-   * Validates that token manipulation attempts are properly handled
-   */
-  it('Property: Token manipulation attempts are properly rejected', () => {
-    fc.assert(fc.property(
-      arbitraryTokenManipulationScenario(),
-      (scenario) => {
-        const { manipulationType, expectedStatus } = scenario
-        
-        // All token manipulation should result in 401 (authentication failure)
-        const tokenManipulationTypes = [
-          'empty', 'null', 'malformed', 'expired', 
-          'wrong-secret', 'missing-claims', 'invalid-signature'
-        ]
-        
-        if (tokenManipulationTypes.includes(manipulationType)) {
-          expect(expectedStatus).toBe(401)
-        }
-        
-        return true
-      }
-    ), { numRuns: 100 })
-  })
-
-  /**
-   * Endpoint Access Control Property Test
-   * 
-   * Validates comprehensive endpoint access control across all scenarios
-   */
-  it('Property: Endpoint access control is consistently enforced', () => {
-    fc.assert(fc.property(
-      arbitraryEndpointAccessScenario(),
-      (scenario) => {
-        const { endpoint, userRole, hasValidToken, maliciousHeaders } = scenario
-        
-        const isAuthorized = endpoint.allowedRoles.includes(userRole)
-        
-        // Without valid token, should never be authorized regardless of headers
-        if (!hasValidToken) {
-          expect(isAuthorized).toBe(endpoint.allowedRoles.includes(userRole))
-          // But the system should return 401, not check authorization
-        }
-        
-        // With valid token, authorization should be based on JWT role only
-        if (hasValidToken) {
-          const actualAccess = endpoint.allowedRoles.includes(userRole)
-          expect(actualAccess).toBe(isAuthorized)
-          
-          // Malicious headers should not affect the decision
-          const hasPrivilegedHeaders = Object.values(maliciousHeaders).some(value =>
-            ['ADMIN', 'SUPERUSER', 'ROOT'].includes(value)
-          )
-          
-          if (hasPrivilegedHeaders && !isAuthorized) {
-            // Headers claim privilege but JWT doesn't - should still be denied
-            expect(actualAccess).toBe(false)
-          }
-        }
-        
-        return true
-      }
-    ), { numRuns: 100 })
-  })
+     it('allows admin', async () => {
+          const res = await request(app).delete('/admin-route').set('Authorization', await tokenHelpers.admin())
+          expect(res.status).toBe(200)
+     })
 })
