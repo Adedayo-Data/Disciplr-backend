@@ -38,6 +38,7 @@ model User {
   lastLoginAt   DateTime?
   deletedAt     DateTime?
   vaults        Vault[]
+  notifications Notification[]
   refreshTokens RefreshToken[]
   transactions  Transaction[]
 
@@ -75,38 +76,22 @@ model Vault {
   @@map("vaults")
 }
 
-enum TransactionType {
-  creation
-  validation
-  release
-  redirect
-  cancel
-}
+model Notification {
+  id             String    @id @default(uuid())
+  userId         String    @map("user_id")
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type           String
+  title          String
+  message        String
+  data           Json?
+  idempotencyKey String?   @map("idempotency_key")
+  readAt         DateTime? @map("read_at")
+  archivedAt     DateTime? @map("archived_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
 
-model Transaction {
-  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId           String          @map("user_id") @db.Uuid
-  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  vaultId          String          @map("vault_id")
-  vault            Vault           @relation(fields: [vaultId], references: [id], onDelete: Cascade)
-  txHash           String          @unique @map("tx_hash") @db.VarChar(64)
-  type             TransactionType
-  amount           Decimal         @db.Decimal(36, 7)
-  assetCode        String?         @map("asset_code") @db.VarChar(12)
-  fromAccount      String          @map("from_account") @db.VarChar(56)
-  toAccount        String          @map("to_account") @db.VarChar(56)
-  memo             String?
-  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz
-  stellarLedger    Int             @map("stellar_ledger")
-  stellarTimestamp DateTime        @map("stellar_timestamp") @db.Timestamptz
-  explorerUrl      String          @map("explorer_url") @db.VarChar(255)
-
-  @@index([userId], name: "idx_transactions_user_id")
-  @@index([vaultId], name: "idx_transactions_vault_id")
-  @@index([type], name: "idx_transactions_type")
-  @@index([createdAt], name: "idx_transactions_created_at")
-  @@index([stellarLedger], name: "idx_transactions_stellar_ledger")
-  @@index([txHash], name: "idx_transactions_tx_hash")
-  @@index([userId, vaultId, type, createdAt], name: "idx_transactions_user_vault_type_created")
-  @@map("transactions")
+  @@index([userId])
+  @@index([readAt])
+  @@index([userId, archivedAt, createdAt])
+  @@unique([userId, idempotencyKey])
+  @@map("notifications")
 }

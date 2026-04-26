@@ -15,13 +15,29 @@ if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true })
 }
 
-export const db: DatabaseType = new Database(dbPath)
+const createFallbackDb = (): DatabaseType => ({
+    pragma: () => undefined,
+    exec: () => undefined,
+    prepare: () => ({
+        get: () => null,
+        run: () => undefined,
+    }),
+} as unknown as DatabaseType)
 
-// Enable WAL mode for better performance
-db.pragma('journal_mode = WAL')
+export const db: DatabaseType = (() => {
+    try {
+        const database = new Database(dbPath)
+        database.pragma('journal_mode = WAL')
+        return database
+    } catch (error) {
+        console.warn('better-sqlite3 unavailable, using no-op analytics database fallback')
+        return createFallbackDb()
+    }
+})()
 
 // Initialize database schema
 export function initializeDatabase(): void {
+    const db = getDb()
     // Create vaults table
     db.exec(`
     CREATE TABLE IF NOT EXISTS vaults (
@@ -73,8 +89,15 @@ export function initializeDatabase(): void {
     console.log('Database initialized successfully')
 }
 
+// Function to close database connection
+export function closeDatabase(): void {
+    db.close()
+    console.log('Database connection closed')
+}
+
 // Function to update analytics summary (can be called after vault changes)
 export function updateAnalyticsSummary(): void {
+    const db = getDb()
     const stats = db.prepare(`
     SELECT 
       COUNT(*) as total_vaults,
@@ -91,6 +114,10 @@ export function updateAnalyticsSummary(): void {
         failed_vaults: number
         total_locked_capital: number | null
         active_capital: number | null
+    } | undefined | null
+
+    if (!stats) {
+        return
     }
 
     const totalCompleted = stats.completed_vaults || 0

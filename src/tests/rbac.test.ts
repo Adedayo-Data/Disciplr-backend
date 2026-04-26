@@ -1,10 +1,10 @@
-import { describe, it, beforeAll } from '@jest/globals'
+import { describe, it, beforeAll, beforeEach } from '@jest/globals'
 import request from 'supertest'
 import express from 'express'
-import { authenticate, signToken } from '../middleware/auth.js'
-import { requireUser, requireVerifier, requireAdmin } from '../middleware/rbac.js'
 import { UserRole } from '../types/user.js'
 import { jest } from '@jest/globals'
+
+const mockGetVerifierProfile = jest.fn<any>()
 
 // Mock database connection
 const mockDb = {
@@ -18,7 +18,12 @@ const mockDb = {
 }
 
 jest.unstable_mockModule('../db/index.js', () => ({
+  db: jest.fn<any>(() => mockDb),
   default: jest.fn<any>(() => mockDb),
+}))
+
+jest.unstable_mockModule('../services/verifiers.js', () => ({
+  getVerifierProfile: mockGetVerifierProfile,
 }))
 
 let app: express.Express
@@ -34,6 +39,7 @@ beforeAll(async () => {
 
     app.get('/user-route', authModule.authenticate, rbacModule.requireUser, (_req, res) => res.json({ ok: true }))
     app.post('/verify-route', authModule.authenticate, rbacModule.requireVerifier, (_req, res) => res.json({ ok: true }))
+    app.post('/active-verify-route', authModule.authenticate, rbacModule.requireVerifier, rbacModule.requireActiveVerifier, (req, res) => res.json({ verifier: req.verifier }))
     app.delete('/admin-route', authModule.authenticate, rbacModule.requireAdmin, (_req, res) => res.json({ ok: true }))
 
     tokenHelpers = {
@@ -41,6 +47,10 @@ beforeAll(async () => {
         verifier: async () => `Bearer ${await authModule.signToken({ userId: '1', role: UserRole.VERIFIER })}`,
         admin: async () => `Bearer ${await authModule.signToken({ userId: '1', role: UserRole.ADMIN })}`,
     }
+})
+
+beforeEach(() => {
+     mockGetVerifierProfile.mockReset()
 })
 
 describe('authenticate', () => {
@@ -91,6 +101,33 @@ describe('requireVerifier', () => {
      it('allows admin', async () => {
           const res = await request(app).post('/verify-route').set('Authorization', await tokenHelpers.admin())
           expect(res.status).toBe(200)
+     })
+})
+
+describe('requireActiveVerifier', () => {
+     it('denies verifier token without registry row', async () => {
+          mockGetVerifierProfile.mockResolvedValue(undefined)
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(403)
+     })
+
+     it.each(['pending', 'suspended', 'deactivated'])('denies %s registry status', async (status) => {
+          mockGetVerifierProfile.mockResolvedValue({ userId: '1', status })
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(403)
+     })
+
+     it('allows approved registry status and attaches verifier profile', async () => {
+          mockGetVerifierProfile.mockResolvedValue({ userId: '1', status: 'approved', metadata: { specialty: 'docs' } })
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(200)
+          expect(res.body.verifier.status).toBe('approved')
+     })
+
+     it('returns 500 when verifier registry lookup fails', async () => {
+          mockGetVerifierProfile.mockRejectedValue(new Error('db down'))
+          const res = await request(app).post('/active-verify-route').set('Authorization', await tokenHelpers.verifier())
+          expect(res.status).toBe(500)
      })
 })
 
