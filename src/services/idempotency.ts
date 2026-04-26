@@ -1,5 +1,67 @@
 import { Knex } from 'knex'
+import { createHash } from 'node:crypto'
 import { ParsedEvent } from '../types/horizonSync.js'
+import crypto from 'node:crypto'
+import { getPgPool } from '../db/pool.js'
+
+export class IdempotencyConflictError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'IdempotencyConflictError'
+  }
+}
+
+interface StoredIdempotentResponse<T = unknown> {
+  requestHash: string
+  resourceId: string
+  response: T
+}
+
+const apiIdempotencyStore = new Map<string, StoredIdempotentResponse>()
+
+export class IdempotencyConflictError extends Error {
+  constructor(message = 'Idempotency key has already been used with a different payload.') {
+    super(message)
+    this.name = 'IdempotencyConflictError'
+  }
+}
+
+export const hashRequestPayload = (payload: unknown): string => {
+  return createHash('sha256').update(JSON.stringify(payload ?? null)).digest('hex')
+}
+
+export const getIdempotentResponse = async <T>(
+  key: string,
+  requestHash: string,
+): Promise<T | null> => {
+  const record = apiIdempotencyStore.get(key)
+  if (!record) {
+    return null
+  }
+
+  if (record.requestHash !== requestHash) {
+    throw new IdempotencyConflictError()
+  }
+
+  return record.response as T
+}
+
+export const saveIdempotentResponse = async <T>(
+  key: string,
+  requestHash: string,
+  resourceId: string,
+  response: T,
+): Promise<void> => {
+  apiIdempotencyStore.set(key, {
+    requestHash,
+    resourceId,
+    response,
+  })
+}
+
+export const resetIdempotencyStore = (): void => {
+  apiIdempotencyStore.clear()
+}
 
 /**
  * Idempotency Service
@@ -75,4 +137,37 @@ export class IdempotencyService {
       created_at: new Date()
     })
   }
+}
+
+export async function getIdempotentResponse<T>(key: string, requestHash: string): Promise<T | null> {
+  const pool = getPgPool()
+  if (!pool) return null
+
+  const result = await pool.query(
+    'SELECT response, request_hash FROM idempotency_keys WHERE key = $1',
+    [key]
+  )
+
+  if (result.rows.length === 0) return null
+
+  const record = result.rows[0]
+  if (record.request_hash !== requestHash) {
+    throw new IdempotencyConflictError('Idempotency key already used with a different payload')
+  }
+
+  return record.response as T
+}
+
+export async function saveIdempotentResponse(key: string, requestHash: string, vaultId: string, response: any): Promise<void> {
+  const pool = getPgPool()
+  if (!pool) return
+
+  await pool.query(
+    'INSERT INTO idempotency_keys (key, request_hash, vault_id, response, created_at) VALUES ($1, $2, $3, $4, NOW())',
+    [key, requestHash, vaultId, JSON.stringify(response)]
+  )
+}
+
+export function hashRequestPayload(payload: any): string {
+  return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex')
 }
