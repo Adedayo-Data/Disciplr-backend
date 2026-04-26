@@ -160,6 +160,28 @@ API runs at `http://localhost:3000`.
 | `npm run migrate:latest` | Apply all pending migrations |
 | `npm run migrate:rollback` | Roll back the latest migration batch |
 | `npm run migrate:status` | Show migration status |
+| `npm run openapi:generate` | Regenerate OpenAPI specification from Zod schemas |
+| `npm run openapi:validate` | Validate the generated OpenAPI specification |
+
+## API Documentation
+
+The API is documented using OpenAPI 3.1. The specification is generated automatically from the Zod schemas used in the code.
+
+### View Documentation
+The specification file is located at `docs/openapi.yaml`. You can view it using any OpenAPI/Swagger viewer (e.g., [Swagger Editor](https://editor.swagger.io/)).
+
+### Generate Specification
+To regenerate the specification after making changes to the routes or schemas:
+```bash
+npm run openapi:generate
+```
+
+### Validate Specification
+To validate the specification:
+```bash
+npm run openapi:validate
+```
+
 
 ## Abuse detection instrumentation
 
