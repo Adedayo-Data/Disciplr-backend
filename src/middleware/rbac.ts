@@ -57,29 +57,6 @@ export const requireAdmin = enforceRBAC({
   allow: [UserRole.ADMIN],
 });
 
-export const requireActiveVerifier = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  if (!req.user) {
-    logRBACDenied(req, "missing_user");
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
-  let profile
-  try {
-    profile = await getVerifierProfile(req.user.userId)
-    if (!profile || profile.status !== 'approved') {
-      logRBACDenied(req, "verifier_not_approved");
-      res.status(403).json({
-        error: "Forbidden",
-        message: "Verifier registry approval required",
-      });
-      return;
-    }
-  } catch {
-    res.status(500).json({ error: "Internal server error" });
-    return;
-  }
-
-  req.verifier = profile
-  next()
-}
+export const requireVerifier = enforceRBAC({
+  allow: [UserRole.VERIFIER, UserRole.ADMIN],
+});

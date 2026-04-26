@@ -1,7 +1,15 @@
 import { createAuditLog, AuditLog } from '../lib/audit-logs.js'
 import { db } from '../db/knex.js'
 
-export type VerifierStatus = 'pending' | 'approved' | 'suspended' | 'deactivated'
+export type VerifierStatus = 'pending' | 'approved' | 'suspended'
+export type VerificationResult = 'approved' | 'rejected'
+
+export class VerificationConflictError extends Error {
+  constructor() {
+    super('conflict: decision already made')
+    this.name = 'VerificationConflictError'
+  }
+}
 
 export interface VerifierProfile {
   userId: string
@@ -18,7 +26,7 @@ export interface VerificationRecord {
   id: string
   verifierUserId: string
   targetId: string
-  result: 'approved' | 'rejected'
+  result: VerificationResult
   disputed: boolean
   timestamp: string
 }
@@ -81,9 +89,8 @@ export const createVerifierProfile = async (
 
 export const createOrGetVerifierProfile = async (
   userId: string,
-  opts: { displayName?: string; metadata?: Record<string, unknown> } | undefined,
-  context: VerifierMutationContext,
-): Promise<VerifierProfile> => {
+  opts?: { displayName?: string; metadata?: Record<string, unknown> },
+) => {
   const existing = await db('verifiers').where({ user_id: userId }).first()
   if (existing) return mapVerifierRow(existing)
 
@@ -186,10 +193,47 @@ export const listVerifierProfiles = async (): Promise<VerifierProfile[]> => {
   return rows.map(mapVerifierRow)
 }
 
-export const recordVerification = async (verifierUserId: string, targetId: string, result: 'approved' | 'rejected', disputed = false): Promise<VerificationRecord> => {
+export const setVerifierStatus = async (
+  userId: string,
+  status: VerifierStatus,
+): Promise<VerifierProfile | null> => {
+  const row = await db('verifiers').where({ user_id: userId }).first()
+  if (!row) return null
+
+  const [updated] = await db('verifiers').where({ user_id: userId }).update(mapStatusToUpdates(status)).returning('*')
+  return mapVerifierRow(updated)
+}
+
+export const recordVerification = async (
+  verifierUserId: string,
+  targetId: string,
+  result: VerificationResult,
+  disputed = false,
+): Promise<VerificationRecord> => {
+  const existing = await db('verifications')
+    .where({
+      verifier_user_id: verifierUserId,
+      target_id: targetId,
+    })
+    .first()
+
+  if (existing) {
+    if (existing.result === result) {
+      return mapVerificationRow(existing)
+    }
+
+    throw new VerificationConflictError()
+  }
+
   const [rec] = await db('verifications')
-    .insert({ verifier_user_id: verifierUserId, target_id: targetId, result, disputed })
+    .insert({
+      verifier_user_id: verifierUserId,
+      target_id: targetId,
+      result,
+      disputed,
+    })
     .returning('*')
+
   return mapVerificationRow(rec)
 }
 
@@ -226,7 +270,6 @@ export const getVerifierStats = async (userId: string) => {
   }
 }
 
-// Helpers for tests and development
 export const resetVerifiers = async (): Promise<void> => {
   await db('verifications').del()
   await db('verifiers').del()

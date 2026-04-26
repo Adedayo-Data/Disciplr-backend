@@ -1,3 +1,4 @@
+import { NotificationService } from '../services/notifications/factory.js'
 import type { JobHandler, JobType } from './types.js'
 
 type JobHandlerRegistry = {
@@ -16,10 +17,10 @@ const logJob = (type: JobType, message: string): void => {
 
 export const defaultJobHandlers: JobHandlerRegistry = {
   'notification.send': async (payload, context) => {
-    await sleep(40)
+    await NotificationService.send(payload.recipient, payload.subject, payload.body)
     logJob(
       'notification.send',
-      `sent recipient=${payload.recipient} subject="${payload.subject}" attempt=${context.attempt}`,
+      `executed job_id=${context.jobId} attempt=${context.attempt}`,
     )
   },
   'deadline.check': async (payload, context) => {
