@@ -81,19 +81,10 @@ export const strictRateLimiter = createRateLimiter({
   message: 'Rate limit exceeded. This endpoint has strict rate limits.',
 })
 
-// Keyed by IP only — never by API key — so credential stuffing from one IP
-// is blocked regardless of which account is targeted.
-export const loginRateLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: 'Too many login attempts. Please try again later.',
-  keyGenerator: normalizeIp,
-})
-
-export const apiKeyRateLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+export const metricsRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
   max: 20,
-  message: 'Too many API key creation requests. Please try again later.',
+  message: 'Metrics endpoint rate limit exceeded. Please try again later.',
 })
 
 export { createRateLimiter }

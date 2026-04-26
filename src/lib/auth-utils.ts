@@ -6,7 +6,7 @@ const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'fallback-access-secret'
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'fallback-refresh-secret'
 
 export const hashPassword = async (password: string): Promise<string> => {
-    return bcrypt.hash(password, 10)
+    return bcrypt.hash(password, 12)
 }
 
 export const comparePassword = async (password: string, hash: string): Promise<boolean> => {
