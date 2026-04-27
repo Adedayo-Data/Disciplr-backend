@@ -97,7 +97,6 @@ beforeAll(async () => {
     const roleSource = trustedSource
     expect(roleSource).toBe('JWT')
   })
-})
 
 beforeEach(() => {
      mockGetVerifierProfile.mockReset()
